@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous Windows OS Assistant</title>
+  <link rel="stylesheet" href="style.css?v=3.1">
+  <!-- Modern Font Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header / Command Deck -->
+    <header class="command-deck">
+      <div class="deck-left">
+        <div class="brand-badge">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">AI OS Assistant</span>
+            <span class="brand-subtitle">Autonomous Windows Desktop Assistant</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Hardware Telemetry SVG Gauges -->
+      <div class="deck-telemetry" id="deck-telemetry">
+        <div class="telemetry-gauge" title="Real-time CPU Utilization">
+          <svg class="gauge-ring" viewBox="0 0 36 36">
+            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path id="gauge-cpu" class="gauge-bar cyan" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+          </svg>
+          <div class="gauge-meta">
+            <span class="gauge-val" id="val-cpu">0%</span>
+            <span class="gauge-label">CPU</span>
+          </div>
+        </div>
+
+        <div class="telemetry-gauge" title="Real-time RAM Consumption">
+          <svg class="gauge-ring" viewBox="0 0 36 36">
+            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path id="gauge-ram" class="gauge-bar violet" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+          </svg>
+          <div class="gauge-meta">
+            <span class="gauge-val" id="val-ram">0%</span>
+            <span class="gauge-label">RAM</span>
+          </div>
+        </div>
+
+        <div class="telemetry-gauge" title="C:\ Disk Space Used">
+          <svg class="gauge-ring" viewBox="0 0 36 36">
+            <path class="gauge-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path id="gauge-disk" class="gauge-bar emerald" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+          </svg>
+          <div class="gauge-meta">
+            <span class="gauge-val" id="val-disk">0%</span>
+            <span class="gauge-label">DISK</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Controls & Status -->
+      <div class="deck-actions">
+        <div class="model-pill" id="display-model" title="Configured Model Engine">
+          <span class="pulse-dot online"></span>
+          <span>⚡ Gemini 2.0 Flash</span>
+        </div>
+        <button id="btn-toggle-hud" class="btn-deck-icon" title="Toggle Floating HUD Mode">
+          <span>🪄 HUD Bar</span>
+        </button>
+        <button id="btn-connect-phone" class="btn-deck-action phone-btn" title="Pair Phone over LAN">
+          <span>📱 Phone Remote</span>
+          <span class="badge-mini">LAN</span>
+        </button>
+        <button id="btn-emergency-stop" class="btn-emergency" title="Halt all agent operations immediately">
+          <span>🛑 EMERGENCY STOP</span>
+        </button>
+        <button id="btn-open-settings" class="btn-deck-icon" title="Settings">⚙️</button>
+      </div>
+    </header>
+
+    <!-- Main Navigation Tabs Bar -->
+    <nav class="matrix-tabs">
+      <button class="matrix-tab active" data-tab="tab-console">
+        <span class="tab-icon">💬</span>
+        <span>Assistant Console</span>
+      </button>
+      <button class="matrix-tab" data-tab="tab-browser">
+        <span class="tab-icon">🌐</span>
+        <span>Browser Agent</span>
+        <span class="tab-badge" id="browser-tab-count">Active</span>
+      </button>
+      <button class="matrix-tab" data-tab="tab-documents">
+        <span class="tab-icon">📁</span>
+        <span>Document Studio (PPT & PDF)</span>
+        <span class="tab-badge special">New</span>
+      </button>
+      <button class="matrix-tab" data-tab="tab-system">
+        <span class="tab-icon">⚙️</span>
+        <span>System Control</span>
+      </button>
+      <button class="matrix-tab" data-tab="tab-vision">
+        <span class="tab-icon">👁️</span>
+        <span>Vision Inspector</span>
+      </button>
+    </nav>
+
+    <!-- Body Container -->
+    <div class="body-container">
+      <!-- Sidebar / Mission Log -->
+      <aside class="sidebar-log">
+        <div class="log-header">
+          <span class="log-title">AGENT ACTIVITY ORBIT</span>
+          <button id="btn-new-task" class="btn-mini-new">+ New Session</button>
+        </div>
+
+        <div class="orbit-status-card">
+          <div class="agent-row" id="row-browser">
+            <span class="status-pip active"></span>
+            <span class="agent-name">Browser Controller</span>
+            <span class="agent-mode">UIA / CDP</span>
+          </div>
+          <div class="agent-row" id="row-file">
+            <span class="status-pip active"></span>
+            <span class="agent-name">File & Doc Engine</span>
+            <span class="agent-mode">PPTX / PDF / Diff</span>
+          </div>
+          <div class="agent-row" id="row-system">
+            <span class="status-pip active"></span>
+            <span class="agent-name">System Agent</span>
+            <span class="agent-mode">Process / Win32</span>
+          </div>
+          <div class="agent-row" id="row-vision">
+            <span class="status-pip active"></span>
+            <span class="agent-name">Vision Agent</span>
+            <span class="agent-mode">Multimodal / OCR</span>
+          </div>
+        </div>
+
+        <div class="log-header" style="margin-top: 18px;">
+          <span class="log-title">RECENT MISSIONS</span>
+          <button id="btn-clear-tasks" class="btn-mini-clear" title="Clear all chat history">Clear All</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+
+        <div class="sidebar-bottom-info">
+          <div class="lan-status" id="lan-display">Connecting to LAN...</div>
+        </div>
+      </aside>
+
+      <!-- Tab Content Area -->
+      <main class="content-viewport">
+        <!-- 1. ASSISTANT CONSOLE TAB -->
+        <div class="tab-pane active" id="tab-console">
+          <div class="chat-viewport" id="chat-viewport">
+            <div class="welcome-card" id="welcome-card">
+              <div class="welcome-glow"></div>
+              <div class="welcome-badge">AUTONOMOUS WINDOWS OS ASSISTANT</div>
+              <h2>What would you like me to do?</h2>
+              <p>Control your browser, generate PowerPoint decks and PDF reports, manage local files, and inspect system telemetry.</p>
+
+              <div class="bento-grid">
+                <div class="bento-card" data-cmd="Create a PowerPoint presentation on PES University with key pillars and overview">
+                  <div class="bento-icon cyan">📊</div>
+                  <div class="bento-content">
+                    <h4>Create PES University PPT</h4>
+                    <p>Generates multi-slide widescreen .pptx presentation deck with styled cards.</p>
+                  </div>
+                </div>
+
+                <div class="bento-card" data-cmd="Generate an executive PDF report on Artificial Intelligence trends and benchmarks">
+                  <div class="bento-icon violet">📑</div>
+                  <div class="bento-content">
+                    <h4>Generate AI Report PDF</h4>
+                    <p>Publication-grade PDF report with executive summary and benchmark tables.</p>
+                  </div>
+                </div>
+
+                <div class="bento-card" data-cmd="Open my browser and assist login to portal">
+                  <div class="bento-icon emerald">🌐</div>
+                  <div class="bento-content">
+                    <h4>Browser Agent Login</h4>
+                    <p>Operate your running Chrome/Edge browser and submit login credentials safely.</p>
+                  </div>
+                </div>
+
+                <div class="bento-card" data-cmd="Inspect system telemetry and show top memory processes">
+                  <div class="bento-icon amber">⚙️</div>
+                  <div class="bento-content">
+                    <h4>System Telemetry & Specs</h4>
+                    <p>Live CPU, RAM, disk diagnostics, and background process management.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="message-thread" class="message-thread"></div>
+          </div>
+
+          <!-- Bottom Control & Prompt Bar -->
+          <footer class="bottom-dock">
+            <div class="permission-bar">
+              <div class="perm-selector-wrapper">
+                <span class="perm-icon">🛡️</span>
+                <span class="perm-label">GOVERNANCE MODE:</span>
+                <select id="select-permission-mode" class="perm-select">
+                  <option value="balanced" selected>Balanced (Safe Auto-Run, Prompt High-Risk)</option>
+                  <option value="full_access">Full Access (Auto-Execute All Non-Destructive)</option>
+                  <option value="ask_every_step">Ask Every Step (Strict Human Confirmation)</option>
+                  <option value="read_only">Read-Only (Inspect & Preview Only)</option>
+                </select>
+              </div>
+              <div class="perm-status" id="perm-status-indicator">
+                <span class="pulse-dot green"></span>
+                <span>Active Policy Enforced</span>
+              </div>
+            </div>
+
+            <div class="input-glass-box">
+              <button id="btn-mic" class="btn-dock-mic" title="Push to talk or toggle voice dictation">🎙️</button>
+              <textarea id="prompt-input" rows="1" placeholder="Instruct Nexus Agent (e.g. 'Create a presentation on Quantum Computing' or 'Check my running tabs')..."></textarea>
+              <button id="btn-send" class="btn-dock-send" title="Dispatch Instruction">➤</button>
+            </div>
+            <div class="dock-subtext">Option A Active • Zero-Setup Cloud API • Press Enter to Send • Esc to Cancel</div>
+          </footer>
+        </div>
+
+        <!-- 2. BROWSER AGENT TAB -->
+        <div class="tab-pane" id="tab-browser">
+          <div class="deck-container">
+            <div class="deck-card-header">
+              <div>
+                <h3>🌐 Browser Agent Console</h3>
+                <p>Controls your ALREADY-RUNNING Chrome, Edge, or Brave session. Strictly zero Playwright.</p>
+              </div>
+              <button id="btn-refresh-tabs" class="btn-secondary-action">🔄 Refresh Tabs</button>
+            </div>
+
+            <!-- Browser Login Helper Card -->
+            <div class="glass-section">
+              <div class="section-title">
+                <span class="sec-icon">🔐</span>
+                <span>Browser Login & Credential Portal</span>
+              </div>
+              <p class="sec-desc">Enter login credentials below. The Browser Agent will focus your browser window, navigate to the portal, type credentials safely with password masking, and notify you if MFA/CAPTCHA verification is required.</p>
+              
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Portal / Login URL (Optional if tab already open):</label>
+                  <input type="text" id="login-url" placeholder="https://example.com/login">
+                </div>
+                <div class="form-group">
+                  <label>Username / Email:</label>
+                  <input type="text" id="login-username" placeholder="user@domain.com">
+                </div>
+                <div class="form-group">
+                  <label>Password (Safely Masked):</label>
+                  <input type="password" id="login-password" placeholder="••••••••••••">
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="btn-exec-login" class="btn-accent-action">🚀 Submit Credentials to Browser</button>
+                <button id="btn-open-browser" class="btn-secondary-action">🌐 Focus / Open Browser</button>
+              </div>
+              <div id="login-result-box" class="result-notice hidden"></div>
+            </div>
+
+            <!-- Active Tabs Scanner -->
+            <div class="glass-section" style="margin-top: 18px;">
+              <div class="section-title">
+                <span class="sec-icon">📑</span>
+                <span>Open Browser Tabs (UI Automation)</span>
+              </div>
+              <div id="tabs-list-container" class="tabs-grid">
+                <div class="empty-notice">Scanning running browser session...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. DOCUMENT STUDIO TAB (PPTX & PDF) -->
+        <div class="tab-pane" id="tab-documents">
+          <div class="deck-container">
+            <div class="deck-card-header">
+              <div>
+                <h3>📁 Autonomous Document Studio</h3>
+                <p>Generates rich, publication-grade PowerPoint (.pptx) presentations and Executive PDF (.pdf) reports.</p>
+              </div>
+              <button id="btn-refresh-docs" class="btn-secondary-action">🔄 Refresh Documents</button>
+            </div>
+
+            <!-- Instant Creation Deck -->
+            <div class="doc-creator-deck">
+              <div class="creator-card">
+                <div class="card-tag pptx">POWERPOINT DECK (.PPTX)</div>
+                <h4>Generate Presentation</h4>
+                <p>Generates multi-slide widescreen deck with custom themes, bento cards, and key stats.</p>
+                <div class="creator-input-group">
+                  <input type="text" id="input-pptx-topic" placeholder="e.g. PES University Overview" value="PES University Overview">
+                  <button id="btn-create-pptx" class="btn-accent-action">📊 Create PPTX</button>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-tag pdf">EXECUTIVE REPORT (.PDF)</div>
+                <h4>Generate PDF Report</h4>
+                <p>Publication-grade PDF with executive callout box, metric tables, and running headers.</p>
+                <div class="creator-input-group">
+                  <input type="text" id="input-pdf-title" placeholder="e.g. Artificial Intelligence Report" value="Artificial Intelligence Comprehensive Report">
+                  <button id="btn-create-pdf" class="btn-accent-action violet">📑 Create PDF</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Document Shelf -->
+            <div class="glass-section" style="margin-top: 20px;">
+              <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="sec-icon">🗂️</span>
+                  <span>Generated Documents Shelf</span>
+                </div>
+                <button id="btn-clear-all-docs" class="btn-mini-clear" title="Delete all generated files">🗑️ Delete All Files</button>
+              </div>
+              <div id="docs-gallery" class="docs-gallery">
+                <div class="empty-notice">Loading generated documents...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. SYSTEM CONTROL TAB -->
+        <div class="tab-pane" id="tab-system">
+          <div class="deck-container">
+            <div class="deck-card-header">
+              <div>
+                <h3>⚙️ System Agent & Process Manager</h3>
+                <p>Real-time hardware introspection, approved application launching, and process diagnostics.</p>
+              </div>
+              <button id="btn-refresh-telemetry" class="btn-secondary-action">🔄 Refresh Stats</button>
+            </div>
+
+            <div class="sys-metrics-grid" id="sys-metrics-detail">
+              <div class="metric-box">
+                <span class="metric-title">CPU UTILIZATION</span>
+                <span class="metric-value" id="sys-cpu-val">--%</span>
+                <span class="metric-sub">Multi-Core Processor</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">SYSTEM MEMORY (RAM)</span>
+                <span class="metric-value" id="sys-ram-val">--%</span>
+                <span class="metric-sub" id="sys-ram-gb">-- GB Used</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">PRIMARY DISK (C:)</span>
+                <span class="metric-value" id="sys-disk-val">--%</span>
+                <span class="metric-sub" id="sys-disk-gb">-- GB Free</span>
+              </div>
+            </div>
+
+            <div class="glass-section" style="margin-top: 18px;">
+              <div class="section-title">
+                <span class="sec-icon">🚀</span>
+                <span>Quick Application Launchers</span>
+              </div>
+              <div class="quick-apps-grid">
+                <button class="app-chip" data-app="calculator">🧮 Calculator</button>
+                <button class="app-chip" data-app="notepad">📝 Notepad</button>
+                <button class="app-chip" data-app="cmd">⚡ Command Prompt</button>
+                <button class="app-chip" data-app="powershell">💻 PowerShell</button>
+                <button class="app-chip" data-app="taskmgr">📊 Task Manager</button>
+                <button class="app-chip" data-app="explorer">📁 File Explorer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. VISION INSPECTOR TAB -->
+        <div class="tab-pane" id="tab-vision">
+          <div class="deck-container">
+            <div class="deck-card-header">
+              <div>
+                <h3>👁️ Vision Agent Desktop Inspector</h3>
+                <p>Multimodal screen reasoning, error diagnosis, and live visual coordinate verification.</p>
+              </div>
+              <button id="btn-capture-vision" class="btn-accent-action">📸 Capture & Analyze Screen</button>
+            </div>
+
+            <div class="vision-workspace">
+              <div class="vision-preview-card">
+                <div class="preview-header">
+                  <span>Live Desktop Screen Capture</span>
+                  <button id="btn-refresh-preview" class="btn-mini-new">Refresh</button>
+                </div>
+                <img id="vision-screen-img" src="/api/screenshot" alt="Desktop Screenshot">
+              </div>
+
+              <div class="vision-analysis-card">
+                <div class="preview-header">
+                  <span>Multimodal Visual Diagnosis</span>
+                </div>
+                <div id="vision-text-output" class="vision-output-text">
+                  Click "Capture & Analyze Screen" to dispatch Vision Agent for UI inspection, error explanation, or on-screen target localization.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- FLOATING HUD BAR OVERLAY (Can be shown on top of screen) -->
+  <div id="floating-hud-bar" class="floating-hud hidden">
+    <div class="hud-handle">:::</div>
+    <div class="hud-badge">NEXUS HUD</div>
+    <input type="text" id="hud-input" placeholder="Type instruction for Nexus OS Agent...">
+    <button id="hud-btn-mic" class="hud-icon-btn">🎙️</button>
+    <button id="hud-btn-send" class="hud-send-btn">➤</button>
+    <button id="hud-btn-close" class="hud-close-btn">✕</button>
+  </div>
+
+  <!-- PHONE REMOTE LAN PAIRING MODAL -->
+  <div id="phone-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📱</span>
+          <h3>Phone Remote over LAN</h3>
+        </div>
+        <button id="btn-close-phone" class="modal-close-btn">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <p class="modal-desc">Connect your smartphone to the same Wi-Fi network to control your laptop with a wireless mini-trackpad, live screen mirror, and push-to-talk microphone.</p>
+        
+        <div class="qr-code-box">
+          <img id="pairing-qr-img" src="" alt="Pairing QR Code">
+          <div class="qr-subtext">Scan with your phone camera</div>
+        </div>
+
+        <div class="lan-meta-block">
+          <div class="meta-row">
+            <span class="meta-label">Remote URL:</span>
+            <input type="text" id="lan-url-input" readonly value="http://127.0.0.1:8000/remote">
+            <button id="btn-copy-url" class="btn-mini-copy">Copy</button>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Pairing PIN:</span>
+            <span class="pin-badge" id="display-pairing-pin">4826</span>
+          </div>
+        </div>
+
+        <div class="modal-footer-actions">
+          <a id="btn-open-remote-tab" href="/remote" target="_blank" class="btn-secondary-action">Test Remote in New Tab</a>
+          <button id="btn-done-phone" class="btn-accent-action">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-card-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">⚙️</span>
+          <h3>System & Provider Settings</h3>
+        </div>
+        <button id="btn-close-settings" class="modal-close-btn">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <div class="form-group">
+          <label>AI Model Engine:</label>
+          <select id="select-provider">
+            <option value="gemini">Google Gemini 2.0 Flash (Recommended / Free Tier)</option>
+            <option value="groq">Groq Cloud (Llama 3.3 70B / Free Tier)</option>
+            <option value="openai">OpenAI / Compatible Endpoint</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Google Gemini API Key (aistudio.google.com):</label>
+          <input type="password" id="input-gemini-key" placeholder="AIzaSy...">
+        </div>
+
+        <div class="form-group">
+          <label>Groq API Key (console.groq.com):</label>
+          <input type="password" id="input-groq-key" placeholder="gsk_...">
+        </div>
+
+        <div class="form-group">
+          <label>Mobile Remote Pairing PIN:</label>
+          <input type="text" id="input-pin" value="4826">
+        </div>
+
+        <div class="form-group">
+          <label>Neural TTS Voice:</label>
+          <select id="select-voice">
+            <option value="en-US-JennyNeural">Jenny (Natural US Female)</option>
+            <option value="en-US-GuyNeural">Guy (Natural US Male)</option>
+            <option value="en-IN-NeerjaNeural">Neerja (Indian English Female)</option>
+          </select>
+        </div>
+
+        <div class="modal-footer-actions">
+          <button id="btn-save-settings" class="btn-accent-action">Save Configuration</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=3.1"></script>
+</body>
+</html>

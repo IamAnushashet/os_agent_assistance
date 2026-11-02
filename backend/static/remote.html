@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Nexus OS // Phone Remote & Web Controller</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: #1e293b;
+      --card-hover: #27354a;
+      --card-border: #334155;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --danger: #ef4444;
+      --amber: #f59e0b;
+      --emerald: #10b981;
+      --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', Consolas, monospace;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: var(--font-main);
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top Header */
+    header {
+      height: 44px;
+      background: #0f172a;
+      border-bottom: 1px solid var(--card-border);
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+    .brand {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-title {
+      color: var(--text);
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--danger);
+      transition: background 0.2s ease;
+    }
+    .dot.connected {
+      background: var(--emerald);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-emergency {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .btn-emergency:active {
+      background: var(--danger);
+      color: white;
+    }
+
+    /* Screen Mirror */
+    #screen-container {
+      height: 28vh;
+      background: #000;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-bottom: 1px solid var(--card-border);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #screen-view {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .screen-overlay {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: #38bdf8;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--card-border);
+      padding: 2px 7px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    /* Scrollable Toolbars */
+    .bars-container {
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      background: #0f172a;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .tools-bar {
+      display: flex;
+      gap: 5px;
+      padding: 5px 8px;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tools-bar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tools-bar.browser-bar {
+      border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+      background: rgba(30, 41, 59, 0.4);
+    }
+
+    .btn-bar-item {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 9px;
+      border-radius: 5px;
+      white-space: nowrap;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+      transition: all 0.1s ease;
+    }
+    .btn-bar-item:active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .btn-bar-item.highlight {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #93c5fd;
+    }
+
+    /* Virtual Trackpad */
+    #trackpad {
+      flex: 1;
+      background: var(--card);
+      margin: 6px 8px;
+      border-radius: 8px;
+      border: 1px dashed var(--card-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      touch-action: none;
+      min-height: 80px;
+    }
+    .trackpad-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      pointer-events: none;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .trackpad-hint b {
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    /* Mouse Action Helpers */
+    .mouse-actions {
+      display: flex;
+      gap: 6px;
+      padding: 0 8px 6px;
+      flex-shrink: 0;
+    }
+    .btn-mouse {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 7px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.1s ease;
+    }
+    .btn-mouse:active, .btn-mouse.active {
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: white;
+    }
+    .btn-mouse.drag-active {
+      background: var(--amber);
+      color: #0b0f19;
+      border-color: var(--amber);
+    }
+
+    /* Live Status Banner */
+    .status-toast {
+      padding: 4px 10px;
+      background: #0f172a;
+      border-top: 1px solid var(--card-border);
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .status-toast .toast-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+    .status-toast .toast-indicator {
+      color: var(--emerald);
+      font-size: 9.5px;
+      font-weight: 700;
+      margin-left: 6px;
+      flex-shrink: 0;
+    }
+
+    /* Command / Web Search Footer */
+    footer {
+      padding: 6px 8px 8px;
+      background: #0f172a;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .input-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .cmd-input {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: white;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      outline: none;
+    }
+    .cmd-input:focus {
+      border-color: var(--accent);
+    }
+
+    .btn-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 6px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .btn-icon.active {
+      background: var(--danger);
+      color: white;
+    }
+
+    .action-buttons-row {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-action-main {
+      flex: 1.2;
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      color: white;
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 7px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: background 0.15s ease;
+    }
+    .btn-action-main:active {
+      background: var(--accent-hover);
+    }
+
+    .btn-action-sub {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 7px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .btn-action-sub:active {
+      background: var(--card-hover);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    /* Pairing Modal */
+    #pin-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 5, 12, 0.85);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .modal-box {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 88%;
+      max-width: 320px;
+      text-align: center;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    }
+    .pin-input {
+      width: 140px;
+      margin: 16px auto;
+      font-size: 22px;
+      font-family: var(--font-mono);
+      letter-spacing: 5px;
+      text-align: center;
+      padding: 8px;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      color: #38bdf8;
+      border-radius: 8px;
+      outline: none;
+    }
+    .btn-pair {
+      width: 100%;
+      background: var(--accent);
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13.5px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Pairing Modal -->
+  <div id="pin-modal">
+    <div class="modal-box">
+      <h3 style="font-size:16px; margin-bottom:6px;">Pair with Windows Laptop</h3>
+      <p style="font-size:12px; color:var(--text-muted);">Enter 4-digit PIN (Default: <b>4826</b>)</p>
+      <input type="tel" id="input-pin" class="pin-input" maxlength="4" placeholder="••••" value="4826" autofocus>
+      <button class="btn-pair" id="btn-pair">Connect Over LAN</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div id="status-dot" class="dot"></div>
+      <span class="brand-title">NEXUS REMOTE</span>
+    </div>
+    <div class="header-actions">
+      <button id="btn-stop" class="btn-emergency">🛑 STOP</button>
+    </div>
+  </header>
+
+  <!-- Live Desktop Mirror -->
+  <div id="screen-container">
+    <img id="screen-view" alt="Screen Mirror">
+    <div id="screen-status" class="screen-overlay">CONNECTING...</div>
+  </div>
+
+  <!-- Dual Control Bars -->
+  <div class="bars-container">
+    <!-- Web Application & Browser Control Row -->
+    <div class="tools-bar browser-bar">
+      <button class="btn-bar-item highlight" data-browser="address_bar">🌐 Address Bar (Ctrl+L)</button>
+      <button class="btn-bar-item" data-browser="new_tab">➕ New Tab</button>
+      <button class="btn-bar-item" data-browser="refresh">🔄 Refresh (F5)</button>
+      <button class="btn-bar-item" data-browser="back">⟵ Back</button>
+      <button class="btn-bar-item" data-browser="forward">⟶ Next</button>
+      <button class="btn-bar-item" data-browser="close_tab">✕ Close Tab</button>
+      <button class="btn-bar-item" data-browser="scroll_up">⬆ Page Up</button>
+      <button class="btn-bar-item" data-browser="scroll_down">⬇ Page Down</button>
+    </div>
+
+    <!-- Windows Navigation & Shortcuts Row -->
+    <div class="tools-bar">
+      <button class="btn-bar-item" data-key="win">🪟 Win</button>
+      <button class="btn-bar-item" data-hotkey="alt,tab">⇄ Alt+Tab</button>
+      <button class="btn-bar-item" data-key="enter">↵ Enter</button>
+      <button class="btn-bar-item" data-key="backspace">⌫ Backspace</button>
+      <button class="btn-bar-item" data-key="escape">Esc</button>
+      <button class="btn-bar-item" data-key="tab">Tab</button>
+      <button class="btn-bar-item" data-hotkey="ctrl,c">Ctrl+C</button>
+      <button class="btn-bar-item" data-hotkey="ctrl,v">Ctrl+V</button>
+      <button class="btn-bar-item" data-hotkey="win,shift,s">✂️ Snip</button>
+    </div>
+  </div>
+
+  <!-- Virtual Trackpad -->
+  <div id="trackpad">
+    <div class="trackpad-hint">
+      <b>Virtual Trackpad Active</b><br>
+      • Drag 1 Finger: Move Cursor<br>
+      • Tap 1 Finger: Left Click<br>
+      • Tap 2 Fingers: Right Click<br>
+      • Drag 2 Fingers: Scroll Window
+    </div>
+  </div>
+
+  <!-- Mouse Action Helpers -->
+  <div class="mouse-actions">
+    <button class="btn-mouse" id="btn-click-left">Left Click</button>
+    <button class="btn-mouse" id="btn-drag">Hold Drag</button>
+    <button class="btn-mouse" id="btn-click-right">Right Click</button>
+  </div>
+
+  <!-- Live Status Toast -->
+  <div class="status-toast">
+    <span class="toast-text" id="status-toast-text">Ready for remote command</span>
+    <span class="toast-indicator" id="status-indicator">ONLINE</span>
+  </div>
+
+  <!-- Command & Web Search Footer -->
+  <footer>
+    <div class="input-row">
+      <button class="btn-icon" id="btn-mic" title="Voice Input">🎙️</button>
+      <input type="text" id="cmd-text" class="cmd-input" placeholder="Type to search web or instruct PC..." autocomplete="off">
+    </div>
+
+    <div class="action-buttons-row">
+      <!-- 1. Instant Web Search (User's primary request) -->
+      <button class="btn-action-main" id="btn-search-web" title="Instantly search in web browser">
+        🔍 Search Web App
+      </button>
+
+      <!-- 2. Direct Type & Submit into whatever active window/search box is focused on PC -->
+      <button class="btn-action-sub" id="btn-type-enter" title="Type text directly into focused field on PC">
+        ⌨️ Type & Enter
+      </button>
+
+      <!-- 3. Autonomous Multi-Agent Mission -->
+      <button class="btn-action-sub" id="btn-send-agent" title="Dispatch multi-agent autonomous mission">
+        🤖 Agent Run
+      </button>
+    </div>
+  </footer>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let ws = null;
+    let isHoldDragging = false;
+    let touchStartX = 0, touchStartY = 0;
+    let lastTouchX = 0, lastTouchY = 0;
+    let touchStartTime = 0;
+    let initialTouchCount = 0;
+
+    const screenView = document.getElementById('screen-view');
+    const screenStatus = document.getElementById('screen-status');
+    const statusDot = document.getElementById('status-dot');
+    const trackpad = document.getElementById('trackpad');
+    const btnStop = document.getElementById('btn-stop');
+    const btnDrag = document.getElementById('btn-drag');
+    const btnClickLeft = document.getElementById('btn-click-left');
+    const btnClickRight = document.getElementById('btn-click-right');
+    const cmdText = document.getElementById('cmd-text');
+    const btnSearchWeb = document.getElementById('btn-search-web');
+    const btnTypeEnter = document.getElementById('btn-type-enter');
+    const btnSendAgent = document.getElementById('btn-send-agent');
+    const btnMic = document.getElementById('btn-mic');
+    const pinModal = document.getElementById('pin-modal');
+    const inputPin = document.getElementById('input-pin');
+    const btnPair = document.getElementById('btn-pair');
+    const toastText = document.getElementById('status-toast-text');
+    const toastIndicator = document.getElementById('status-indicator');
+
+    function showToast(msg, isSuccess = true) {
+      if (toastText) {
+        toastText.innerText = msg;
+        if (toastIndicator) {
+          toastIndicator.innerText = isSuccess ? "ACTIVE" : "NOTE";
+          toastIndicator.style.color = isSuccess ? "var(--emerald)" : "var(--amber)";
+        }
+      }
+    }
+
+    // Auto-pair token handling
+    const urlParams = new URLSearchParams(window.location.search);
+    let activeToken = urlParams.get('token') || localStorage.getItem('nexus_remote_token') || '';
+    let reconnectTimer = null;
+
+    function connectWebSocket(pinOverride) {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        try { ws.close(); } catch (e) {}
+      }
+
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${window.location.host}/ws/remote`;
+
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = "blob";
+
+      ws.onopen = () => {
+        const pinVal = (pinOverride !== undefined ? pinOverride : (inputPin ? inputPin.value : '4826')).trim();
+        const payload = {
+          pin: pinVal || "4826"
+        };
+        if (activeToken) {
+          payload.token = activeToken;
+        }
+        ws.send(JSON.stringify(payload));
+      };
+
+      let prevBlobUrl = null;
+      ws.onmessage = async (evt) => {
+        if (evt.data instanceof Blob) {
+          if (prevBlobUrl) {
+            URL.revokeObjectURL(prevBlobUrl);
+          }
+          prevBlobUrl = URL.createObjectURL(evt.data);
+          screenView.src = prevBlobUrl;
+          screenStatus.innerText = "LIVE (15 FPS)";
+          screenStatus.style.color = "#38bdf8";
+          statusDot.className = "dot connected";
+        } else {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.type === "AUTH_SUCCESS") {
+              if (data.token) {
+                activeToken = data.token;
+                localStorage.setItem('nexus_remote_token', data.token);
+              }
+              pinModal.style.display = "none";
+              screenStatus.innerText = "AUTHENTICATED";
+              showToast("Connected to Windows OS Assistant over LAN");
+            } else if (data.type === "AUTH_FAILED") {
+              activeToken = '';
+              localStorage.removeItem('nexus_remote_token');
+              if (window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }
+              pinModal.style.display = "flex";
+              if (inputPin) {
+                inputPin.value = "4826";
+                inputPin.focus();
+              }
+              showToast("Pairing failed: " + data.message, false);
+            } else if (data.type === "SEARCH_EXECUTED") {
+              showToast(`Searched web for: "${data.query}"`);
+            } else if (data.type === "ACTION_FEEDBACK") {
+              showToast(data.message);
+            } else if (data.type === "TASK_DISPATCHED") {
+              showToast(`Agent mission started: ${data.task_id}`);
+            } else if (data.type === "EMERGENCY_STOPPED") {
+              showToast("🛑 EMERGENCY STOP HALTED ALL ACTIONS", false);
+            }
+          } catch (e) {}
+        }
+      };
+
+      ws.onclose = () => {
+        statusDot.className = "dot";
+        screenStatus.innerText = "DISCONNECTED";
+        screenStatus.style.color = "var(--danger)";
+        if (pinModal.style.display === "none") {
+          showToast("Reconnecting to laptop...", false);
+          reconnectTimer = setTimeout(() => connectWebSocket(), 3000);
+        }
+      };
+    }
+
+    btnPair.addEventListener('click', () => {
+      const pin = (inputPin.value || '4826').trim();
+      showToast(`Connecting with PIN: ${pin}...`);
+      connectWebSocket(pin);
+    });
+
+    inputPin.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        btnPair.click();
+      }
+    });
+
+    // Auto connect immediately
+    connectWebSocket();
+
+    // Touchpad Input Mechanics
+    trackpad.addEventListener('touchstart', (e) => {
+      initialTouchCount = e.touches.length;
+      touchStartTime = Date.now();
+      const t = e.touches[0];
+      touchStartX = lastTouchX = t.clientX;
+      touchStartY = lastTouchY = t.clientY;
+    }, { passive: false });
+
+    trackpad.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      if (e.touches.length === 1) {
+        // 1-Finger Cursor Movement
+        const t = e.touches[0];
+        const dx = (t.clientX - lastTouchX) * 1.5;
+        const dy = (t.clientY - lastTouchY) * 1.5;
+        lastTouchX = t.clientX;
+        lastTouchY = t.clientY;
+
+        ws.send(JSON.stringify({ type: "trackpad_move", dx, dy }));
+      } else if (e.touches.length === 2) {
+        // 2-Finger Vertical Scroll
+        const t = e.touches[0];
+        const dy = t.clientY - lastTouchY;
+        lastTouchY = t.clientY;
+        const scrollAmount = (dy > 0 ? -1 : 1) * 2;
+        ws.send(JSON.stringify({ type: "trackpad_scroll", amount: scrollAmount }));
+      }
+    }, { passive: false });
+
+    trackpad.addEventListener('touchend', (e) => {
+      const elapsed = Date.now() - touchStartTime;
+      const totalMoved = Math.hypot(lastTouchX - touchStartX, lastTouchY - touchStartY);
+
+      if (elapsed < 250 && totalMoved < 8) {
+        // Tap gesture
+        if (initialTouchCount === 1) {
+          ws.send(JSON.stringify({ type: "trackpad_click", button: "left" }));
+        } else if (initialTouchCount === 2) {
+          ws.send(JSON.stringify({ type: "trackpad_click", button: "right" }));
+        }
+      }
+    });
+
+    // Mouse Buttons
+    btnClickLeft.addEventListener('click', () => {
+      if (ws) ws.send(JSON.stringify({ type: "trackpad_click", button: "left" }));
+    });
+
+    btnClickRight.addEventListener('click', () => {
+      if (ws) ws.send(JSON.stringify({ type: "trackpad_click", button: "right" }));
+    });
+
+    btnDrag.addEventListener('click', () => {
+      isHoldDragging = !isHoldDragging;
+      if (isHoldDragging) {
+        btnDrag.classList.add('drag-active');
+        btnDrag.innerText = "Dragging (Tap to Release)";
+        if (ws) ws.send(JSON.stringify({ type: "trackpad_mouse_down", button: "left" }));
+      } else {
+        btnDrag.classList.remove('drag-active');
+        btnDrag.innerText = "Hold Drag";
+        if (ws) ws.send(JSON.stringify({ type: "trackpad_mouse_up", button: "left" }));
+      }
+    });
+
+    // Browser Actions Bar (Web App Control)
+    document.querySelectorAll('[data-browser]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-browser');
+        if (ws && action) {
+          ws.send(JSON.stringify({ type: "browser_action", action }));
+          showToast(`Browser command: ${action}`);
+        }
+      });
+    });
+
+    // Windows Quick Keys Bar
+    document.querySelectorAll('[data-key], [data-hotkey]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-key');
+        const hotkey = btn.getAttribute('data-hotkey');
+        if (ws && key) {
+          ws.send(JSON.stringify({ type: "press_key", key }));
+          showToast(`Key pressed: ${key}`);
+        } else if (ws && hotkey) {
+          ws.send(JSON.stringify({ type: "hotkey", keys: hotkey.split(',') }));
+          showToast(`Hotkey: ${hotkey.replace(',', '+')}`);
+        }
+      });
+    });
+
+    // Emergency Stop
+    btnStop.addEventListener('click', () => {
+      if (ws) ws.send(JSON.stringify({ type: "emergency_stop" }));
+      showToast("🛑 EMERGENCY STOP TRANSMITTED", false);
+    });
+
+    // Action 1: Instant Web Search (Direct into web application / Google)
+    function triggerWebSearch() {
+      const text = cmdText.value.trim();
+      if (!text || !ws) return;
+      showToast(`Searching web application for '${text}'...`);
+      ws.send(JSON.stringify({ type: "web_search", query: text }));
+      cmdText.value = '';
+    }
+
+    // Action 2: Direct Type & Enter into whatever active field is focused on PC
+    function triggerTypeAndEnter() {
+      const text = cmdText.value.trim();
+      if (!text || !ws) return;
+      showToast(`Typing & submitting text into PC...`);
+      ws.send(JSON.stringify({ type: "type_and_enter", text: text }));
+      cmdText.value = '';
+    }
+
+    // Action 3: Autonomous Agent Mission
+    function triggerAgentMission() {
+      const text = cmdText.value.trim();
+      if (!text || !ws) return;
+      showToast(`Dispatching agent mission...`);
+      ws.send(JSON.stringify({ type: "user_prompt", prompt: text }));
+      cmdText.value = '';
+    }
+
+    btnSearchWeb.addEventListener('click', triggerWebSearch);
+    btnTypeEnter.addEventListener('click', triggerTypeAndEnter);
+    btnSendAgent.addEventListener('click', triggerAgentMission);
+
+    // If Enter pressed on mobile keyboard in input: Default to Instant Web Search!
+    cmdText.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        triggerWebSearch();
+      }
+    });
+
+    // Speech-To-Text fallback for phone
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognizer = new SpeechRec();
+      recognizer.continuous = false;
+
+      let micActive = false;
+      btnMic.addEventListener('click', () => {
+        if (micActive) {
+          recognizer.stop();
+          btnMic.classList.remove('active');
+          micActive = false;
+        } else {
+          recognizer.start();
+          btnMic.classList.add('active');
+          micActive = true;
+          showToast("Listening... speak your search or command");
+        }
+      });
+
+      recognizer.onresult = (evt) => {
+        const text = evt.results[0][0].transcript;
+        cmdText.value = text;
+        btnMic.classList.remove('active');
+        micActive = false;
+        showToast(`Heard: "${text}"`);
+        // Immediately search in web application!
+        triggerWebSearch();
+      };
+
+      recognizer.onerror = () => {
+        btnMic.classList.remove('active');
+        micActive = false;
+        showToast("Mic cancelled", false);
+      };
+    }
+  </script>
+</body>
+</html>
