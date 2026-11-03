@@ -166,7 +166,26 @@ class MultiAgentOrchestrator:
             update_task_status(task_id, TaskState.PLANNING)
             await self.broadcast_event(task_id, "PHASE_CHANGED", {"phase": TaskState.PLANNING})
 
-            plan_obj = await semantic_planner.formulate_plan(prompt=prompt)
+            # Retrieve recent conversation context for multi-turn task continuity
+            chat_history = []
+            try:
+                from db import list_tasks
+                recent_tasks = list_tasks(limit=8)
+                for pt in reversed(recent_tasks):
+                    if pt.get("id") == task_id:
+                        continue
+                    u_prompt = pt.get("user_prompt")
+                    if u_prompt:
+                        chat_history.append({"role": "user", "content": u_prompt})
+                    plan_data = pt.get("plan") or {}
+                    rep_data = pt.get("completion_report") or {}
+                    resp = plan_data.get("conversational_response") or rep_data.get("summary") or ""
+                    if resp:
+                        chat_history.append({"role": "assistant", "content": resp})
+            except Exception as ex:
+                logger.warning(f"Could not load chat history for task planning: {ex}")
+
+            plan_obj = await semantic_planner.formulate_plan(prompt=prompt, chat_history=chat_history)
             plan = plan_obj.to_dict()
             save_task_plan(task_id, plan)
             await self.broadcast_event(task_id, "PLAN_GENERATED", plan)

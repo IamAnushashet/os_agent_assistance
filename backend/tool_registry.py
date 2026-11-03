@@ -220,7 +220,7 @@ class ToolRegistry:
         self.register(ToolDefinition(
             name="file_write",
             agent="File Agent",
-            description="Writes content to a file with automatic rolling backup.",
+            description="Writes content to a file with automatic rolling backup. Use this tool whenever creating, generating, or saving code files, scripts, applications, and documents directly.",
             parameters={"path": {"type": "string"}, "content": {"type": "string"}},
             category=ActionCategory.FILE_WRITE.value,
             risk_level=RiskLevel.MEDIUM.value,
@@ -450,7 +450,7 @@ class ToolRegistry:
         self.register(ToolDefinition(
             name="system_run_command",
             agent="System Agent",
-            description="Executes validated PowerShell command with safety restrictions.",
+            description="Executes validated PowerShell command with safety restrictions for system administration, diagnostics, and process management. Do NOT use this to write or create code files (use file_write instead).",
             parameters={"command": {"type": "string"}},
             category=ActionCategory.SYSTEM_COMMAND.value,
             risk_level=RiskLevel.HIGH.value,

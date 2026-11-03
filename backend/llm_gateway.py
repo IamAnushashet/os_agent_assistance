@@ -52,7 +52,7 @@ class LLMGateway:
         messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.2,
-        max_tokens: int = 1500,
+        max_tokens: int = 4096,
         json_mode: bool = False
     ) -> Dict[str, Any]:
         """
@@ -60,7 +60,7 @@ class LLMGateway:
         Bypasses OpenAI proxy bottlenecks and includes automatic model fallbacks.
         """
         api_key = settings.effective_api_key
-        models_to_try = [model, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+        models_to_try = [model, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
         unique_models = []
         for m in models_to_try:
             if m and m not in unique_models:
@@ -190,7 +190,7 @@ class LLMGateway:
         messages: List[Dict[str, Any]],
         model: Optional[str] = None,
         temperature: float = 0.2,
-        max_tokens: int = 1500,
+        max_tokens: int = 4096,
         json_mode: bool = False
     ) -> Dict[str, Any]:
         """

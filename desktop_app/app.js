@@ -24,6 +24,124 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function renderMarkdown(text) {
+  if (text === null || text === undefined) return '';
+  const str = String(text);
+
+  // 1. Extract fenced code blocks first to protect contents from HTML escaping & formatting
+  const codeBlocks = [];
+  let processed = str.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n?([\s\S]*?)```/g, (match, lang, code) => {
+    const placeholder = `@@@NEXUS_CODEBLOCK_${codeBlocks.length}@@@`;
+    codeBlocks.push({
+      lang: lang ? lang.trim() : 'code',
+      code: code
+    });
+    return placeholder;
+  });
+
+  // 2. Escape HTML on text to prevent XSS and tag-eating (<iostream>, <vector>, etc.)
+  processed = escapeHtml(processed);
+
+  // 3. Markdown Headings
+  processed = processed.replace(/^### (.*$)/gim, '<h4 class="md-h4">$1</h4>');
+  processed = processed.replace(/^## (.*$)/gim, '<h3 class="md-h3">$1</h3>');
+  processed = processed.replace(/^# (.*$)/gim, '<h2 class="md-h2">$1</h2>');
+
+  // 4. Bold & Italic
+  processed = processed.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  processed = processed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // 5. Inline code
+  processed = processed.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+
+  // 6. Numbered and Bullet lists
+  processed = processed.replace(/^\s*[-*]\s+(.*$)/gim, '<li class="md-bullet">$1</li>');
+  processed = processed.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li class="md-num" value="$1">$2</li>');
+
+  // Wrap list items
+  processed = processed.replace(/(<li class="md-bullet">[\s\S]*?<\/li>(?:\s*<li class="md-bullet">[\s\S]*?<\/li>)*)/g, '<ul class="md-list">$1</ul>');
+  processed = processed.replace(/(<li class="md-num"[^>]*>[\s\S]*?<\/li>(?:\s*<li class="md-num"[^>]*>[\s\S]*?<\/li>)*)/g, '<ol class="md-list">$1</ol>');
+
+  // 7. Line breaks and paragraph separation
+  processed = processed.replace(/\r?\n\r?\n/g, '<div style="margin-bottom:8px;"></div>');
+  processed = processed.replace(/\r?\n/g, '<br>');
+
+  // 8. Re-inject Code Blocks with dark container, language badge, and Copy button
+  codeBlocks.forEach((cb, idx) => {
+    const trimmedCode = cb.code.replace(/^\n+|\n+$/g, '');
+    const escapedCode = escapeHtml(trimmedCode);
+    const langLower = (cb.lang || 'code').toLowerCase();
+    let displayLang = cb.lang ? cb.lang.toUpperCase() : 'CODE';
+    if (langLower === 'cpp' || langLower === 'c++') displayLang = 'C++';
+    else if (langLower === 'py' || langLower === 'python') displayLang = 'Python';
+    else if (langLower === 'js' || langLower === 'javascript') displayLang = 'JavaScript';
+    else if (langLower === 'sh' || langLower === 'bash') displayLang = 'Terminal / Bash';
+    else if (langLower === 'json') displayLang = 'JSON';
+    else if (langLower === 'sql') displayLang = 'SQL';
+    else if (langLower === 'html') displayLang = 'HTML';
+    else if (langLower === 'css') displayLang = 'CSS';
+
+    const blockHtml = `
+      <div class="code-block-container">
+        <div class="code-block-header">
+          <span class="code-lang-tag">${escapeHtml(displayLang)}</span>
+          <button class="btn-copy-snippet" onclick="copyCodeSnippet(this)">
+            <span class="copy-icon">📋</span> Copy
+          </button>
+        </div>
+        <pre><code class="language-${escapeHtml(langLower)}">${escapedCode}</code></pre>
+      </div>
+    `;
+    processed = processed.replace(`@@@NEXUS_CODEBLOCK_${idx}@@@`, blockHtml);
+  });
+
+  return `<div class="markdown-body">${processed}</div>`;
+}
+
+function copyCodeSnippet(btn) {
+  const container = btn.closest('.code-block-container');
+  if (!container) return;
+  const codeEl = container.querySelector('code');
+  if (!codeEl) return;
+
+  const rawText = codeEl.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(rawText).then(() => {
+      btn.innerHTML = '<span style="color:#10b981;">✓</span> Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = '<span class="copy-icon">📋</span> Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => fallbackCopy(rawText, btn));
+  } else {
+    fallbackCopy(rawText, btn);
+  }
+}
+
+function fallbackCopy(text, btn) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    btn.innerHTML = '<span style="color:#10b981;">✓</span> Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerHTML = '<span class="copy-icon">📋</span> Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  } catch (e) {}
+  document.body.removeChild(textarea);
+}
+
+window.copyCodeSnippet = copyCodeSnippet;
+window.renderMarkdown = renderMarkdown;
+
 // DOM Elements — Command Deck
 const valCpu = document.getElementById('val-cpu');
 const valRam = document.getElementById('val-ram');
@@ -422,8 +540,8 @@ function pollTaskStatus(taskId, card) {
           sItem.className = 'step-item';
           sItem.innerHTML = `
             <div class="step-left">
-              <span class="step-agent-pill">${s.agent}</span>
-              <span><b>Step ${s.step_number}:</b> ${s.title}</span>
+              <span class="step-agent-pill">${escapeHtml(s.agent)}</span>
+              <span><b>Step ${s.step_number}:</b> ${escapeHtml(s.title)}</span>
             </div>
             <span class="step-status-tag ${isDone ? 'completed' : (isCurrent ? 'running' : '')}">
               ${isDone ? '✓ Verified' : (isCurrent ? '⚡ In Progress' : 'Pending')}
@@ -431,6 +549,16 @@ function pollTaskStatus(taskId, card) {
           `;
           stepsContainer.appendChild(sItem);
         });
+      } else if (task.status === 'COMPLETED') {
+        stepsContainer.innerHTML = `
+          <div class="step-item">
+            <div class="step-left">
+              <span class="step-agent-pill">Nexus Orchestrator</span>
+              <span>Conversational response generated</span>
+            </div>
+            <span class="step-status-tag completed">✓ Verified</span>
+          </div>
+        `;
       }
 
       // Check for approval requirements
@@ -456,12 +584,13 @@ function pollTaskStatus(taskId, card) {
 
         const report = task.completion_report || {};
         const summaryText = task.error_message 
-          ? `<b style="color:var(--accent-crimson)">Failed:</b> ${task.error_message}`
+          ? `<b style="color:var(--accent-crimson)">Failed:</b> ${escapeHtml(task.error_message)}`
           : (report.summary || plan.conversational_response || "Task executed and verified on your Windows desktop.");
 
+        const formattedHtml = task.error_message ? summaryText : renderMarkdown(summaryText);
         summaryBox.innerHTML = `
-          <div>${summaryText}</div>
-          <button class="btn-mini-new" style="margin-top:8px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
+          <div class="summary-content">${formattedHtml}</div>
+          <button class="btn-mini-new" style="margin-top:10px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
         `;
 
         // Check if any document (.pptx or .pdf) was created!
@@ -1596,13 +1725,55 @@ async function renderPastTask(task) {
   statusBadge.innerText = fullTask.status;
   statusBadge.className = `task-status ${fullTask.status.toLowerCase()}`;
 
+  // Populate steps container accurately for past task!
+  const stepsContainer = card.querySelector('.steps-container');
+  const plan = fullTask.plan || {};
+  const steps = plan.steps || [];
+
+  if (steps.length > 0) {
+    stepsContainer.innerHTML = '';
+    steps.forEach(s => {
+      const isDone = fullTask.status === 'COMPLETED';
+      const sItem = document.createElement('div');
+      sItem.className = 'step-item';
+      sItem.innerHTML = `
+        <div class="step-left">
+          <span class="step-agent-pill">${escapeHtml(s.agent)}</span>
+          <span><b>Step ${s.step_number}:</b> ${escapeHtml(s.title)}</span>
+        </div>
+        <span class="step-status-tag ${isDone ? 'completed' : ''}">
+          ${isDone ? '✓ Verified' : 'Executed'}
+        </span>
+      `;
+      stepsContainer.appendChild(sItem);
+    });
+  } else if (fullTask.status === 'COMPLETED') {
+    stepsContainer.innerHTML = `
+      <div class="step-item">
+        <div class="step-left">
+          <span class="step-agent-pill">Nexus Orchestrator</span>
+          <span>Conversational response generated</span>
+        </div>
+        <span class="step-status-tag completed">✓ Verified</span>
+      </div>
+    `;
+  }
+
+  // Ensure approval prompt does not linger on historical completed tasks
+  const lingeringAppBox = card.querySelector('.approval-box');
+  if (lingeringAppBox) lingeringAppBox.remove();
+
   const summaryBox = card.querySelector('.task-summary-box');
   summaryBox.classList.remove('hidden');
   const report = fullTask.completion_report || {};
-  const summaryText = report.summary || fullTask.error_message || 'Completed.';
+  const summaryText = report.summary || fullTask.error_message || (plan.conversational_response || 'Completed.');
+  const formattedHtml = fullTask.error_message 
+    ? `<b style="color:var(--accent-crimson)">Failed:</b> ${escapeHtml(fullTask.error_message)}` 
+    : renderMarkdown(summaryText);
+
   summaryBox.innerHTML = `
-    <div>${summaryText}</div>
-    <button class="btn-mini-new" style="margin-top:8px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
+    <div class="summary-content">${formattedHtml}</div>
+    <button class="btn-mini-new" style="margin-top:10px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
   `;
 
   await checkForCreatedDocument(card, fullTask);

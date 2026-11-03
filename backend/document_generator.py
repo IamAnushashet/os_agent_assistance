@@ -690,6 +690,17 @@ class DocumentGenerator:
                 p_h.paragraph_format.space_after = DocxPt(4)
 
             text = sec_data.get("text") or sec_data.get("content")
+            code_block = sec_data.get("code")
+
+            if not code_block and text and ("#include" in text or "int main(" in text or "```" in text or "def " in text or "class " in text):
+                code_match = re.search(r"```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)```", text)
+                if code_match:
+                    code_block = code_match.group(1).strip()
+                    text = text[:code_match.start()].strip()
+                elif "#include" in text or "int main(" in text:
+                    code_block = text
+                    text = ""
+
             if text:
                 p_t = doc.add_paragraph()
                 r_t = p_t.add_run(text)
@@ -698,6 +709,24 @@ class DocumentGenerator:
                 r_t.font.color.rgb = DocxRGB(0x33, 0x41, 0x55)
                 p_t.paragraph_format.space_after = DocxPt(6)
                 p_t.paragraph_format.line_spacing = 1.15
+
+            if code_block:
+                table_code = doc.add_table(rows=1, cols=1)
+                table_code.alignment = WD_TABLE_ALIGNMENT.CENTER
+                table_code.autofit = True
+                cell = table_code.cell(0, 0)
+                shading = parse_xml(r'<w:shd {} w:fill="0F172A"/>'.format(nsdecls('w')))
+                cell._tc.get_or_add_tcPr().append(shading)
+                p_code = cell.paragraphs[0]
+                p_code.paragraph_format.space_before = DocxPt(6)
+                p_code.paragraph_format.space_after = DocxPt(6)
+                p_code.paragraph_format.line_spacing = 1.05
+                r_code = p_code.add_run(code_block)
+                r_code.font.name = "Consolas"
+                r_code.font.size = DocxPt(9.5)
+                r_code.font.color.rgb = DocxRGB(0x38, 0xBD, 0xF8)
+                p_sp = doc.add_paragraph()
+                p_sp.paragraph_format.space_after = DocxPt(6)
 
             bullets = sec_data.get("bullets", [])
             for b in bullets:

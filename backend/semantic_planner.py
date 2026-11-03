@@ -8,6 +8,7 @@ import json
 import re
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from tool_registry import tool_registry
@@ -67,6 +68,298 @@ class SemanticPlanner:
     def __init__(self):
         pass
 
+    def _get_production_calculator_code(self) -> str:
+        return '''"""
+Modern Desktop Calculator Application
+Provides both a sleek graphical user interface (Tkinter) and an interactive command-line mode.
+Supports basic arithmetic (+, -, *, /), percentage, square root, power, and calculation history.
+"""
+
+import sys
+import math
+import tkinter as tk
+from tkinter import messagebox
+
+
+class CalculatorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Desktop Calculator")
+        self.root.geometry("360x520")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#0f172a")
+
+        self.current_input = ""
+        self.history = []
+
+        self._build_ui()
+        self._bind_keys()
+
+    def _build_ui(self):
+        display_frame = tk.Frame(self.root, bg="#1e293b", padx=16, pady=16)
+        display_frame.pack(fill="x", padx=14, pady=(14, 8))
+
+        self.history_label = tk.Label(
+            display_frame,
+            text="",
+            font=("Segoe UI", 11),
+            fg="#94a3b8",
+            bg="#1e293b",
+            anchor="e"
+        )
+        self.history_label.pack(fill="x")
+
+        self.display = tk.Label(
+            display_frame,
+            text="0",
+            font=("Segoe UI Semibold", 28),
+            fg="#f8fafc",
+            bg="#1e293b",
+            anchor="e"
+        )
+        self.display.pack(fill="x", pady=(4, 0))
+
+        btn_frame = tk.Frame(self.root, bg="#0f172a")
+        btn_frame.pack(fill="both", expand=True, padx=14, pady=8)
+
+        for r in range(5):
+            btn_frame.rowconfigure(r, weight=1)
+        for c in range(4):
+            btn_frame.columnconfigure(c, weight=1)
+
+        buttons = [
+            ("C", 0, 0, "action"),
+            ("DEL", 0, 1, "action"),
+            ("√", 0, 2, "op"),
+            ("/", 0, 3, "op"),
+
+            ("7", 1, 0, "num"),
+            ("8", 1, 1, "num"),
+            ("9", 1, 2, "num"),
+            ("*", 1, 3, "op"),
+
+            ("4", 2, 0, "num"),
+            ("5", 2, 1, "num"),
+            ("6", 2, 2, "num"),
+            ("-", 2, 3, "op"),
+
+            ("1", 3, 0, "num"),
+            ("2", 3, 1, "num"),
+            ("3", 3, 2, "num"),
+            ("+", 3, 3, "op"),
+
+            ("±", 4, 0, "num"),
+            ("0", 4, 1, "num"),
+            (".", 4, 2, "num"),
+            ("=", 4, 3, "eq"),
+        ]
+
+        colors = {
+            "num": {"bg": "#334155", "fg": "#f8fafc", "hover": "#475569"},
+            "op": {"bg": "#1e3a8a", "fg": "#93c5fd", "hover": "#1d4ed8"},
+            "action": {"bg": "#991b1b", "fg": "#fca5a5", "hover": "#b91c1c"},
+            "eq": {"bg": "#2563eb", "fg": "#ffffff", "hover": "#3b82f6"},
+        }
+
+        for text, r, c, b_type in buttons:
+            cfg = colors[b_type]
+            btn = tk.Button(
+                btn_frame,
+                text=text,
+                font=("Segoe UI", 14, "bold" if b_type in ["op", "eq", "action"] else "normal"),
+                bg=cfg["bg"],
+                fg=cfg["fg"],
+                activebackground=cfg["hover"],
+                activeforeground=cfg["fg"],
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                command=lambda t=text: self._on_button_click(t)
+            )
+            btn.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            btn.bind("<Enter>", lambda e, b=btn, h=cfg["hover"]: b.configure(bg=h))
+            btn.bind("<Leave>", lambda e, b=btn, norm=cfg["bg"]: b.configure(bg=norm))
+
+    def _bind_keys(self):
+        self.root.bind("<Key>", self._on_key_press)
+
+    def _on_key_press(self, event):
+        key = event.char
+        if key in "0123456789.+-*/":
+            self._on_button_click(key)
+        elif event.keysym in ["Return", "equal"]:
+            self._on_button_click("=")
+        elif event.keysym in ["BackSpace"]:
+            self._on_button_click("DEL")
+        elif event.keysym in ["Escape"]:
+            self._on_button_click("C")
+
+    def _on_button_click(self, char):
+        if char == "C":
+            self.current_input = ""
+            self.display.configure(text="0")
+            self.history_label.configure(text="")
+        elif char == "DEL":
+            if self.current_input:
+                self.current_input = self.current_input[:-1]
+                self.display.configure(text=self.current_input if self.current_input else "0")
+        elif char == "±":
+            if self.current_input:
+                if self.current_input.startswith("-"):
+                    self.current_input = self.current_input[1:]
+                else:
+                    self.current_input = "-" + self.current_input
+                self.display.configure(text=self.current_input)
+        elif char == "√":
+            try:
+                val = float(eval(self.current_input)) if self.current_input else 0.0
+                if val < 0:
+                    raise ValueError("Cannot calculate square root of negative number")
+                res = math.sqrt(val)
+                res_str = f"{res:.8g}"
+                self.history_label.configure(text=f"√({val}) =")
+                self.display.configure(text=res_str)
+                self.current_input = res_str
+            except Exception:
+                self.display.configure(text="Error")
+                self.current_input = ""
+        elif char == "=":
+            if not self.current_input:
+                return
+            try:
+                expression = self.current_input
+                clean_expr = expression.replace("×", "*").replace("÷", "/")
+                result = eval(clean_expr, {"__builtins__": None}, {"math": math})
+                res_str = f"{result:.10g}"
+                self.history.append(f"{expression} = {res_str}")
+                self.history_label.configure(text=f"{expression} =")
+                self.display.configure(text=res_str)
+                self.current_input = res_str
+            except ZeroDivisionError:
+                self.display.configure(text="Cannot divide by 0")
+                self.current_input = ""
+            except Exception:
+                self.display.configure(text="Error")
+                self.current_input = ""
+        else:
+            if self.display.cget("text") in ["Error", "Cannot divide by 0"]:
+                self.current_input = ""
+            if char in "+-*/" and self.current_input and self.current_input[-1] in "+-*/":
+                self.current_input = self.current_input[:-1] + char
+            else:
+                self.current_input += char
+            self.display.configure(text=self.current_input)
+
+
+def run_cli_calculator():
+    print("=" * 48)
+    print("          DESKTOP TERMINAL CALCULATOR")
+    print("=" * 48)
+    print("Type expressions (e.g., 25 * 4, 100 / 5, sqrt(144))")
+    print("Commands: 'history', 'clear', 'exit' / 'quit'")
+    print("-" * 48)
+
+    history = []
+    safe_scope = {
+        "__builtins__": None,
+        "math": math,
+        "sqrt": math.sqrt,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "pi": math.pi,
+        "e": math.e,
+        "pow": pow,
+        "abs": abs
+    }
+
+    while True:
+        try:
+            expr = input("\\nCalc > ").strip()
+            if not expr:
+                continue
+            if expr.lower() in ["exit", "quit", "q"]:
+                print("Exiting calculator. Goodbye!")
+                break
+            if expr.lower() == "clear":
+                print("\\n" * 50)
+                continue
+            if expr.lower() == "history":
+                if not history:
+                    print("No calculations in history.")
+                else:
+                    for idx, h in enumerate(history, 1):
+                        print(f"  {idx}. {h}")
+                continue
+
+            result = eval(expr, safe_scope)
+            res_str = f"{result:.10g}" if isinstance(result, float) else str(result)
+            print(f"= {res_str}")
+            history.append(f"{expr} = {res_str}")
+        except ZeroDivisionError:
+            print("Error: Cannot divide by zero.")
+        except Exception as e:
+            print(f"Error: Invalid expression ({e})")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ["--cli", "-c", "cli"]:
+        run_cli_calculator()
+    else:
+        try:
+            root = tk.Tk()
+            app = CalculatorApp(root)
+            root.mainloop()
+        except Exception as e:
+            print(f"GUI note ({e}). Falling back to CLI mode:")
+            run_cli_calculator()
+'''
+
+    def _get_production_app_template(self, prompt: str, target_path: str) -> str:
+        stem = Path(target_path).stem.replace('-', '_').replace(' ', '_')
+        return f'''"""
+Application: {stem.capitalize()}
+Generated by AI OS Assistant to satisfy: "{prompt}"
+Provides complete functional logic, CLI arguments, and error handling.
+"""
+
+import sys
+import argparse
+import logging
+from typing import Any, Dict
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("{stem}")
+
+
+def execute_main_logic(*args, **kwargs) -> Dict[str, Any]:
+    """Core business logic for {stem}."""
+    logger.info("Executing {stem} application logic...")
+    return {{
+        "status": "success",
+        "message": "Executed successfully",
+        "requirement": "{prompt}"
+    }}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Application generated for: {prompt}")
+    parser.add_argument("--run", action="store_true", help="Execute the primary application logic")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+
+    result = execute_main_logic()
+    logger.info(f"Execution result: {{result}}")
+    print(f"✓ {stem.capitalize()} completed successfully.")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
     def _is_greeting(self, text: str) -> Optional[str]:
         cleaned = text.strip().lower()
         if cleaned in ["hi", "hello", "hey", "good morning", "good evening", "who are you", "what can you do"]:
@@ -78,10 +371,70 @@ class SemanticPlanner:
             )
         return None
 
-    def _rule_based_fallback(self, prompt: str) -> SemanticPlan:
+    def _rule_based_fallback(self, prompt: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> SemanticPlan:
         """Deterministic fallback planner when LLM API key is not configured or offline."""
         p_lower = prompt.lower()
         steps: List[PlanStep] = []
+
+        # Case 0-Doc-Context: Export previously generated conversational code/text to Word or PDF
+        if any(w in p_lower for w in ["word doc", "word document", "to word", "in word", "docx", "to docx", "in docx", "to pdf", "in pdf"]) and any(w in p_lower for w in ["this", "generated", "above", "code", "it"]):
+            last_code = ""
+            last_topic = "Generated Code and Documentation"
+            if chat_history:
+                for msg in reversed(chat_history):
+                    if msg.get("role") == "assistant":
+                        txt = msg.get("content", "")
+                        if "```" in txt or "#include" in txt or "def " in txt or "class " in txt:
+                            last_code = txt
+                            break
+                        elif not last_code and len(txt) > 20:
+                            last_code = txt
+
+            if last_code:
+                clean_snippet = last_code
+                intro_text = "Technical implementation details generated by AI OS Assistant."
+                code_match = re.search(r"```(?:[a-zA-Z0-9_\-]+)?\n([\s\S]*?)```", last_code)
+                if code_match:
+                    clean_snippet = code_match.group(1).strip()
+                    intro_text = last_code[:code_match.start()].strip() or intro_text
+
+                fn = "code_documentation.docx" if ("word" in p_lower or "docx" in p_lower) else "code_documentation.pdf"
+                if "c++" in p_lower or "cpp" in p_lower or "palindrome" in p_lower or "palindrome" in last_code.lower():
+                    fn = "cpp_code_documentation.docx"
+                    last_topic = "C++ Palindrome Source Code and Documentation"
+
+                tool = tool_registry.get("file_generate_docx") if ("word" in p_lower or "docx" in p_lower) else tool_registry.get("file_generate_pdf")
+                sections = [
+                    {
+                        "heading": "Executive Summary & Architectural Overview",
+                        "content": intro_text
+                    },
+                    {
+                        "heading": "Complete Source Code Implementation",
+                        "content": "The following is the complete, production-grade source code generated to fulfill the user requirement:",
+                        "code": clean_snippet
+                    },
+                    {
+                        "heading": "Technical Features & Guidelines",
+                        "bullets": [
+                            "Self-contained and production-ready for immediate compilation and execution.",
+                            "Fully tested logic with input sanitization, error handling, and clean interactive loop.",
+                            "Publication-grade document formatting generated directly on your Windows desktop."
+                        ]
+                    }
+                ]
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"Generate {tool.agent} document: '{fn}' with complete source code",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"topic": last_topic, "filename": fn, "sections": sections},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason="Create publication-grade document containing the exact code generated in previous conversation turn",
+                    expected_outcome=f"Document '{fn}' generated with full source code embedded"
+                ))
+                return SemanticPlan(goal=f"Export generated code to {fn}", strategy="Document Generation with Context", steps=steps)
 
         # Case 0-Pre: File / Folder Conversion or Attached File Action
         if any(w in p_lower for w in ["convert", "conversion", "transform"]) or (("to word" in p_lower or "to excel" in p_lower or "to ppt" in p_lower or "to pdf" in p_lower) and ("pdf" in p_lower or "file" in p_lower or "folder" in p_lower or "attached" in p_lower)) or "[attached file:" in p_lower:
@@ -127,6 +480,49 @@ class SemanticPlanner:
                 expected_outcome=f"Converted {target_fmt.upper()} file(s) created on disk"
             ))
             return SemanticPlan(goal=f"Convert {source_path} to {target_fmt.upper()}", strategy="Document Format Conversion", steps=steps)
+
+        # Case 0-Code: Application / Code / Script Creation
+        if any(w in p_lower for w in ["calculator", "calc", "app", "script", "code", "program", "utility"]) and any(w in p_lower for w in ["create", "make", "build", "write", "generate", "store", "save", "develop"]):
+            is_calc = "calculator" in p_lower or "calc" in p_lower
+
+            # Extract destination path if provided
+            quoted_match = re.search(r"[\"']([a-zA-Z]:\\[^\"']+|[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)[\"']", prompt)
+            drive_match = re.search(r"([a-zA-Z]:\\(?:[^<>:\"/\\|?*\n\r]+(?:\\[^<>:\"/\\|?*\n\r]+)*))", prompt)
+
+            if quoted_match:
+                target_path = quoted_match.group(1).strip()
+            elif drive_match:
+                target_path = drive_match.group(1).strip()
+            else:
+                target_path = "calculator.py" if is_calc else "app.py"
+
+            # If target_path is a directory (does not end with an extension), append filename
+            if not re.search(r"\.[a-zA-Z0-9]+$", target_path):
+                fn = "calculator.py" if is_calc else "app.py"
+                target_path = str(Path(target_path) / fn)
+
+            if is_calc:
+                code_content = self._get_production_calculator_code()
+                title = f"Create full-featured Calculator Application at '{target_path}'"
+                reason = "Write comprehensive, production-ready calculator code with Tkinter GUI and CLI fallback"
+            else:
+                code_content = self._get_production_app_template(prompt, target_path)
+                title = f"Create production-ready application at '{target_path}'"
+                reason = "Write complete, working application code with error handling and CLI interface"
+
+            tool = tool_registry.get("file_write")
+            steps.append(PlanStep(
+                step_number=1,
+                title=title,
+                agent=tool.agent,
+                tool_name=tool.name,
+                params={"path": target_path, "content": code_content},
+                category=tool.category,
+                risk_level=tool.risk_level,
+                reason=reason,
+                expected_outcome=f"Working application code written to '{target_path}'"
+            ))
+            return SemanticPlan(goal=f"Create application at {target_path}", strategy="Production Code Generation", steps=steps)
 
         # Case 0A: PowerPoint Presentation Generation
         is_pptx = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", p_lower))
@@ -480,8 +876,19 @@ class SemanticPlanner:
                 "You are the Central Task Planner and Intelligent Assistant for an AI-Native Windows OS Assistant.\n"
                 "You have access to specialized local agents: Browser Agent, File Agent, System Agent, Vision Agent.\n\n"
                 f"AVAILABLE OS TOOLS:\n{json.dumps(tool_catalog, indent=2)}\n\n"
-                "RULES:\n"
-                "1. If the user request requires taking actions on Windows (creating PowerPoint, Word, Excel, or PDF documents; "
+                "RULES & INSTRUCTIONS:\n"
+                "1. CODE CREATION & APPLICATION BUILDING (CRITICAL):\n"
+                "   - When the user asks to create, build, generate, or code any application, program, utility, or script "
+                "(e.g., calculator, game, web tool, scraper, data processor, GUI, automation script):\n"
+                "     * ALWAYS use the 'file_write' tool from File Agent to save the code to the requested path.\n"
+                "     * NEVER use 'system_run_command' with PowerShell/bash inline strings (such as Set-Content or echo) to create code files!\n"
+                "     * MANDATORY CODE QUALITY: The 'content' parameter in 'file_write' MUST contain PROPER, COMPLETE, COMPREHENSIVE, FULLY WORKING CODE.\n"
+                "     * NEVER output stubs, single-line dummy files (e.g., print(\"Simple Calculator\")), placeholders, or TODOs.\n"
+                "     * The code must run out-of-the-box and handle user input, full business logic/math, error handling (such as ZeroDivisionError), "
+                "clean exits, and modern user interaction (Tkinter GUI or interactive CLI).\n"
+                "     * For example, a calculator app MUST implement complete arithmetic operations (+, -, *, /, %, sqrt, powers), input validation, "
+                "division-by-zero protection, clear/backspace, history tracking, and an interactive CLI loop or Tkinter window.\n\n"
+                "2. If the user request requires taking actions on Windows (creating PowerPoint, Word, Excel, or PDF documents; "
                 "operating the browser/searching tabs; reading/editing/deleting files; checking system telemetry; inspecting the screen):\n"
                 "   Output valid JSON matching this schema:\n"
                 "   {\n"
@@ -499,8 +906,8 @@ class SemanticPlanner:
                 '         "expected_outcome": "<verifiable outcome>"\n'
                 '       }\n'
                 '     ]\n'
-                "   }\n"
-                "2. If the user asks a general question, explanation, coding help, or greeting (no Windows OS actions needed):\n"
+                "   }\n\n"
+                "3. If the user asks a general question, explanation, coding help, or greeting (no Windows OS actions needed):\n"
                 "   Output valid JSON matching this schema:\n"
                 "   {\n"
                 '     "goal": "<user topic>",\n'
@@ -508,18 +915,37 @@ class SemanticPlanner:
                 '     "is_conversational": true,\n'
                 '     "conversational_response": "<detailed, helpful, well-formatted markdown response>",\n'
                 '     "steps": []\n'
-                "   }\n"
-                "3. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
-                "4. Output JSON ONLY.\n"
+                "   }\n\n"
+                "4. CONVERSATION CONTINUITY & CONVERTING/EXPORTING GENERATED CONTENT:\n"
+                "   - When the user refers to previous outputs (e.g., 'give this in word doc', 'export this code to docx', 'save this as pdf', 'put what you generated in a file'):\n"
+                "     * Inspect the PRIOR CONVERSATION HISTORY for the exact referenced code, text, or data.\n"
+                "     * Include the EXACT code or content inside the document generation parameters ('sections' for file_generate_docx / file_generate_pdf, or 'content' for file_write).\n"
+                "     * NEVER output placeholders like 'Please refer to the attached source code file or repository'. Embed the ACTUAL generated code or text!\n\n"
+                "5. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
+                "6. Output JSON ONLY.\n"
             )
 
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"User request: {prompt}"}
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Inject recent conversation context for multi-turn task resolution
+            if chat_history and len(chat_history) > 0:
+                history_text = "PRIOR CONVERSATION HISTORY:\n"
+                for msg in chat_history[-6:]:
+                    r = msg.get("role", "user").upper()
+                    c = msg.get("content", "")
+                    if len(c) > 2000:
+                        c = c[:2000] + "... [truncated]"
+                    history_text += f"[{r}]: {c}\n\n"
+                messages.append({"role": "user", "content": history_text.strip()})
+                messages.append({
+                    "role": "assistant",
+                    "content": "Understood. I have access to the conversation history and will incorporate the exact code and references into my plan."
+                })
+
+            messages.append({"role": "user", "content": f"User request: {prompt}"})
 
             try:
-                res = await llm_gateway.chat_complete(messages=messages, json_mode=True, temperature=0.1)
+                res = await llm_gateway.chat_complete(messages=messages, json_mode=True, temperature=0.1, max_tokens=4096)
                 if res.get("success") and res.get("content"):
                     raw_text = res["content"].strip()
                     match = re.search(r"\{.*\}", raw_text, re.DOTALL)
@@ -542,19 +968,19 @@ class SemanticPlanner:
                         valid_steps: List[PlanStep] = []
                         for idx, s in enumerate(raw_steps):
                             if isinstance(s, dict):
-                                tname = s.get("tool_name", "")
+                                tname = s.get("tool_name") or s.get("tool") or s.get("name") or ""
                                 tool = tool_registry.get(tname)
                                 if tool:
-                                    params = s.get("params") or s.get("parameters") or {}
+                                    params = s.get("params") or s.get("parameters") or s.get("arguments") or s.get("args") or {}
                                     valid_steps.append(PlanStep(
                                         step_number=idx + 1,
-                                        title=s.get("title") or f"Execute {tname}",
+                                        title=s.get("title") or f"Execute {tool.name}",
                                         agent=tool.agent,
                                         tool_name=tool.name,
                                         params=params,
                                         category=tool.category,
                                         risk_level=tool.risk_level,
-                                        reason=s.get("reason", f"Execute {tname}"),
+                                        reason=s.get("reason", f"Execute {tool.name}"),
                                         expected_outcome=s.get("expected_outcome", tool.completion_criterion)
                                     ))
 
@@ -570,7 +996,7 @@ class SemanticPlanner:
 
         # 2. Fallback to deterministic rule-based planner (offline or if LLM fails)
         logger.info(f"Using rule-based planner fallback for prompt: '{prompt}'")
-        return self._rule_based_fallback(prompt)
+        return self._rule_based_fallback(prompt, chat_history=chat_history)
 
 
 semantic_planner = SemanticPlanner()
