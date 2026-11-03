@@ -16,11 +16,13 @@ DATA_DIR = BACKEND_DIR / "data"
 SCRATCH_DIR = PROJECT_ROOT / "scratch"
 BACKUPS_DIR = SCRATCH_DIR / ".file_backups"
 OUTPUT_DOCS_DIR = PROJECT_ROOT / "generated_documents"
+UPLOADS_DIR = PROJECT_ROOT / "uploads"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
 BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Load environment variables
 from dotenv import load_dotenv

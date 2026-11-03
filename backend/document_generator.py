@@ -34,6 +34,7 @@ try:
     from docx.shared import Pt as DocxPt, RGBColor as DocxRGB, Inches as DocxInches
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.section import WD_ORIENT
     from docx.oxml import OxmlElement, parse_xml
     from docx.oxml.ns import nsdecls, qn
     HAS_DOCX = True
@@ -50,9 +51,26 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
+# PYPDF
+try:
+    import pypdf
+    HAS_PYPDF = True
+except ImportError:
+    HAS_PYPDF = False
+
+import csv
+import html
+import re
 import uuid
+from typing import Dict, Any, List, Optional, Union
 from config import PROJECT_ROOT, OUTPUT_DOCS_DIR
 from db import save_generated_document
+
+try:
+    from PIL import Image as PILImage
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 logger = logging.getLogger("document_generator")
 logger.setLevel(logging.INFO)
@@ -111,7 +129,8 @@ class DocumentGenerator:
         topic: str,
         filename: Optional[str] = None,
         slides_data: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "cyber_sapphire"
+        theme: str = "cyber_sapphire",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a widescreen (16:9) PowerPoint presentation with rich styling,
@@ -363,7 +382,8 @@ class DocumentGenerator:
                 file_path=str(out_path),
                 file_type="PPTX",
                 topic=topic,
-                size_bytes=file_size
+                size_bytes=file_size,
+                task_id=task_id
             )
         except Exception as e:
             logger.warning(f"Could not register presentation in DB: {e}")
@@ -389,7 +409,8 @@ class DocumentGenerator:
         title: str,
         filename: Optional[str] = None,
         sections: Optional[List[Dict[str, Any]]] = None,
-        executive_summary: Optional[str] = None
+        executive_summary: Optional[str] = None,
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a publication-grade PDF report with cover header,
@@ -498,18 +519,23 @@ class DocumentGenerator:
             textColor=colors.HexColor("#0f172a")
         )
 
+        def _safe_rl(val: Any) -> str:
+            s = str(val) if val is not None else ""
+            # Escape HTML/XML entities so ReportLab paraparser never crashes on unescaped <, >, &
+            return html.escape(s)
+
         story = []
 
         # 1. Document Header
-        story.append(Paragraph(title, style_title))
+        story.append(Paragraph(_safe_rl(title), style_title))
         meta_line = f"Publication Date: {datetime.now().strftime('%B %d, %Y')}   |   Status: Verified Report   |   System: AI OS Platform"
-        story.append(Paragraph(meta_line, style_subtitle))
+        story.append(Paragraph(_safe_rl(meta_line), style_subtitle))
         story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0284c7"), spaceBefore=0, spaceAfter=14))
 
         # 2. Executive Summary Callout Box
         summary_inner = [
             [Paragraph("<b>EXECUTIVE SUMMARY</b>", ParagraphStyle("ES_H", fontName="Helvetica-Bold", fontSize=10, textColor=colors.HexColor("#0369a1")))],
-            [Paragraph(executive_summary, style_callout)]
+            [Paragraph(_safe_rl(executive_summary), style_callout)]
         ]
         summary_table = Table(summary_inner, colWidths=[520])
         summary_table.setStyle(TableStyle([
@@ -525,7 +551,7 @@ class DocumentGenerator:
         # 3. Dynamic Sections
         for sec_idx, sec in enumerate(sections):
             heading = sec.get("heading") or sec.get("title") or f"Section {sec_idx + 1}"
-            story.append(Paragraph(heading, style_h1))
+            story.append(Paragraph(_safe_rl(heading), style_h1))
             sec_text = sec.get("text") or sec.get("content") or sec.get("body") or sec.get("description") or ""
             if sec_text:
                 for line in sec_text.split("\n"):
@@ -534,13 +560,13 @@ class DocumentGenerator:
                         continue
                     if line.startswith("•") or line.startswith("- ") or line.startswith("* "):
                         clean_bullet = line.lstrip("•-* ").strip()
-                        story.append(Paragraph(f"•  {clean_bullet}", style_bullet))
+                        story.append(Paragraph(f"•  {_safe_rl(clean_bullet)}", style_bullet))
                     else:
-                        story.append(Paragraph(line, style_body))
+                        story.append(Paragraph(_safe_rl(line), style_body))
 
             # Bullets if any
             for b in sec.get("bullets") or sec.get("items") or []:
-                story.append(Paragraph(f"•  {b}", style_bullet))
+                story.append(Paragraph(f"•  {_safe_rl(b)}", style_bullet))
 
             # Metric Table if any
             table_data = sec.get("table", None)
@@ -552,7 +578,7 @@ class DocumentGenerator:
                     for c in r:
                         font_n = "Helvetica-Bold" if row_idx == 0 else "Helvetica"
                         text_c = colors.HexColor("#ffffff") if row_idx == 0 else colors.HexColor("#1e293b")
-                        p = Paragraph(str(c), ParagraphStyle(f"T_{row_idx}", fontName=font_n, fontSize=8.5, leading=11, textColor=text_c))
+                        p = Paragraph(_safe_rl(c), ParagraphStyle(f"T_{row_idx}", fontName=font_n, fontSize=8.5, leading=11, textColor=text_c))
                         t_row.append(p)
                     t_rows.append(t_row)
 
@@ -584,7 +610,8 @@ class DocumentGenerator:
                 file_path=str(out_path),
                 file_type="PDF",
                 topic=title,
-                size_bytes=file_size
+                size_bytes=file_size,
+                task_id=task_id
             )
         except Exception as e:
             logger.warning(f"Could not register PDF in DB: {e}")
@@ -609,7 +636,8 @@ class DocumentGenerator:
         topic: str,
         filename: Optional[str] = None,
         sections: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "enterprise"
+        theme: str = "enterprise",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a publication-grade Microsoft Word document (.docx) with structured
@@ -661,7 +689,7 @@ class DocumentGenerator:
                 p_h.paragraph_format.space_before = DocxPt(14)
                 p_h.paragraph_format.space_after = DocxPt(4)
 
-            text = sec_data.get("text")
+            text = sec_data.get("text") or sec_data.get("content")
             if text:
                 p_t = doc.add_paragraph()
                 r_t = p_t.add_run(text)
@@ -720,7 +748,8 @@ class DocumentGenerator:
                 file_path=str(out_path),
                 file_type="DOCX",
                 topic=topic,
-                size_bytes=file_size
+                size_bytes=file_size,
+                task_id=task_id
             )
         except Exception as e:
             logger.warning(f"Could not register DOCX in DB: {e}")
@@ -746,7 +775,8 @@ class DocumentGenerator:
         topic: str,
         filename: Optional[str] = None,
         sheets_data: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "modern_blue"
+        theme: str = "modern_blue",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a high-impact Microsoft Excel workbook (.xlsx) with styled title,
@@ -831,7 +861,8 @@ class DocumentGenerator:
                 file_path=str(out_path),
                 file_type="XLSX",
                 topic=topic,
-                size_bytes=file_size
+                size_bytes=file_size,
+                task_id=task_id
             )
         except Exception as e:
             logger.warning(f"Could not register XLSX in DB: {e}")
@@ -848,6 +879,1093 @@ class DocumentGenerator:
             "file_size": file_size,
             "message": f"Excel workbook '{out_path.name}' created with {len(sheets_data)} styled sheets."
         }
+
+    # =========================================================================
+    # 5. UNIVERSAL DOCUMENT CONVERTER & BATCH ENGINE
+    # =========================================================================
+    def extract_text(self, file_path: Union[str, Path]) -> Dict[str, Any]:
+        """Extracts plain text and page structure from PDF, DOCX, XLSX, TXT, CSV, or MD."""
+        p = Path(file_path).resolve()
+        if not p.exists():
+            return {"success": False, "error": f"File not found: {p}"}
+
+        ext = p.suffix.lower()
+        full_text = ""
+        pages_info = []
+
+        try:
+            if ext == ".pdf":
+                if not HAS_PYPDF:
+                    return {"success": False, "error": "pypdf package is not installed."}
+                reader = pypdf.PdfReader(str(p))
+                for i, page in enumerate(reader.pages):
+                    txt = page.extract_text() or ""
+                    pages_info.append({"page": i + 1, "text": txt.strip()})
+                    full_text += f"\n--- Page {i + 1} ---\n" + txt
+
+            elif ext in [".docx", ".doc"]:
+                if not HAS_DOCX:
+                    return {"success": False, "error": "python-docx package is not installed."}
+                doc = DocxDocument(str(p))
+                paras = [pg.text for pg in doc.paragraphs if pg.text.strip()]
+                for tbl in doc.tables:
+                    for row in tbl.rows:
+                        row_txt = " | ".join(c.text.strip() for c in row.cells)
+                        if row_txt.strip():
+                            paras.append(row_txt)
+                full_text = "\n".join(paras)
+                pages_info.append({"page": 1, "text": full_text})
+
+            elif ext in [".xlsx", ".xls"]:
+                if not HAS_OPENPYXL:
+                    return {"success": False, "error": "openpyxl package is not installed."}
+                wb = openpyxl.load_workbook(str(p), data_only=True)
+                for sheet in wb.sheetnames:
+                    ws = wb[sheet]
+                    sheet_lines = []
+                    for row in ws.iter_rows(values_only=True):
+                        vals = [str(v) if v is not None else "" for v in row]
+                        if any(vals):
+                            sheet_lines.append("\t".join(vals))
+                    sheet_txt = "\n".join(sheet_lines)
+                    pages_info.append({"sheet": sheet, "text": sheet_txt})
+                    full_text += f"\n--- Sheet: {sheet} ---\n" + sheet_txt
+
+            elif ext in [".pptx", ".ppt"]:
+                prs = Presentation(str(p))
+                for idx, slide in enumerate(prs.slides):
+                    slide_lines = []
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            for pgraph in shape.text_frame.paragraphs:
+                                if pgraph.text.strip():
+                                    slide_lines.append(pgraph.text.strip())
+                    s_txt = "\n".join(slide_lines)
+                    pages_info.append({"slide": idx + 1, "text": s_txt})
+                    full_text += f"\n--- Slide {idx + 1} ---\n" + s_txt
+
+            elif ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"]:
+                try:
+                    if HAS_PIL:
+                        with PILImage.open(p) as img:
+                            w, h = img.size
+                            full_text = f"Image Deliverable: {p.name}\nDimensions: {w}x{h} px\nFormat: {img.format or ext.upper()}\nMode: {img.mode}"
+                            pages_info.append({"page": 1, "text": full_text})
+                    else:
+                        full_text = f"Image Deliverable: {p.name}"
+                        pages_info.append({"page": 1, "text": full_text})
+                except Exception:
+                    full_text = f"Image Deliverable: {p.name}"
+                    pages_info.append({"page": 1, "text": full_text})
+
+            else:
+                full_text = p.read_text(encoding="utf-8", errors="replace")
+                pages_info.append({"page": 1, "text": full_text})
+
+            return {
+                "success": True,
+                "path": str(p),
+                "filename": p.name,
+                "extension": ext,
+                "pages_count": len(pages_info),
+                "pages": pages_info,
+                "text": full_text.strip(),
+                "char_count": len(full_text)
+            }
+        except Exception as e:
+            logger.error(f"Failed to extract text from {p}: {e}")
+            return {"success": False, "error": str(e), "path": str(p)}
+
+    def convert_file(
+        self,
+        source_path: Union[str, Path],
+        target_format: str,
+        output_dir: Optional[Path] = None,
+        task_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Converts an individual document to target format (docx, xlsx, pptx, pdf).
+        """
+        src = Path(source_path).resolve()
+        if not src.exists():
+            return {"success": False, "error": f"Source file not found: {src}"}
+
+        out_dir = Path(output_dir).resolve() if output_dir else self.output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        target_fmt = target_format.lower().lstrip(".").strip()
+        if target_fmt in ["word", "doc"]: target_fmt = "docx"
+        elif target_fmt in ["excel", "sheet", "spreadsheet"]: target_fmt = "xlsx"
+        elif target_fmt in ["powerpoint", "ppt", "slides", "presentation"]: target_fmt = "pptx"
+        elif target_fmt in ["pdf", "report"]: target_fmt = "pdf"
+
+        src_ext = src.suffix.lower().lstrip(".")
+        clean_stem = "".join(c for c in src.stem if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        dest_filename = f"{clean_stem[:35]}_Converted.{target_fmt}"
+        dest_path = out_dir / dest_filename
+
+        if src_ext == target_fmt:
+            return {
+                "success": True,
+                "path": str(src),
+                "file_path": str(src),
+                "filename": src.name,
+                "file_type": target_fmt.upper(),
+                "file_size": src.stat().st_size,
+                "message": f"File is already in {target_fmt.upper()} format."
+            }
+
+        try:
+            # Image Conversions (PNG, JPG, WEBP, BMP, TIFF, GIF)
+            if src_ext in ["png", "jpg", "jpeg", "webp", "bmp", "tiff", "gif"]:
+                if target_fmt == "pdf":
+                    return self._convert_image_to_pdf(src, dest_path, task_id=task_id)
+                elif target_fmt in ["docx", "doc"]:
+                    return self._convert_image_to_docx(src, dest_path, task_id=task_id)
+                elif target_fmt in ["pptx", "ppt"]:
+                    return self._convert_image_to_pptx(src, dest_path, task_id=task_id)
+                else:
+                    return {"success": False, "error": f"Image conversion to {target_fmt.upper()} is not supported."}
+
+            if src_ext in ["xlsx", "xls"] and target_fmt in ["docx", "doc"]:
+                return self._convert_xlsx_to_docx(src, dest_path, task_id=task_id)
+            elif src_ext in ["xlsx", "xls"] and target_fmt == "pdf":
+                return self._convert_xlsx_to_pdf(src, dest_path)
+            elif src_ext in ["xlsx", "xls"] and target_fmt in ["pptx", "ppt"]:
+                return self._convert_xlsx_to_pptx(src, dest_path)
+            elif src_ext == "pdf" and target_fmt in ["docx", "doc"]:
+                return self._convert_pdf_to_docx(src, dest_path)
+            elif src_ext == "pdf" and target_fmt in ["xlsx", "xls"]:
+                return self._convert_pdf_to_xlsx(src, dest_path)
+            elif src_ext == "pdf" and target_fmt in ["pptx", "ppt"]:
+                return self._convert_pdf_to_pptx(src, dest_path)
+            elif src_ext in ["docx", "doc"] and target_fmt == "pdf":
+                return self._convert_docx_to_pdf(src, dest_path)
+            elif src_ext in ["docx", "doc"] and target_fmt in ["xlsx", "xls"]:
+                return self._convert_docx_to_xlsx(src, dest_path)
+            elif src_ext == "csv" and target_fmt in ["docx", "doc"]:
+                return self._convert_csv_to_docx(src, dest_path)
+            elif src_ext == "csv" and target_fmt in ["xlsx", "xls"]:
+                return self._convert_csv_to_xlsx(src, dest_path)
+            elif src_ext in ["txt", "md", "csv", "log"] and target_fmt in ["docx", "pdf", "xlsx", "pptx"]:
+                return self._convert_text_to_format(src, dest_path, target_fmt)
+            else:
+                return self._convert_generic_via_text(src, dest_path, target_fmt)
+        except Exception as e:
+            logger.error(f"Error converting {src} to {target_fmt}: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "source_file": src.name}
+
+    def convert_batch(
+        self,
+        source_path: Union[str, Path],
+        target_format: str,
+        output_dir: Optional[Path] = None,
+        task_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Converts an individual file OR a whole folder of documents to target_format.
+        """
+        p = Path(source_path).resolve()
+        if not p.exists():
+            return {"success": False, "error": f"Path does not exist: {p}"}
+
+        out_dir = Path(output_dir).resolve() if output_dir else self.output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        target_fmt = target_format.lower().lstrip(".").strip()
+        if target_fmt in ["word", "doc"]: target_fmt = "docx"
+        elif target_fmt in ["excel", "sheet", "spreadsheet"]: target_fmt = "xlsx"
+        elif target_fmt in ["powerpoint", "ppt", "slides", "presentation"]: target_fmt = "pptx"
+        elif target_fmt in ["pdf", "report"]: target_fmt = "pdf"
+
+        # If single file passed
+        if p.is_file():
+            res = self.convert_file(p, target_fmt, out_dir, task_id=task_id)
+            if res.get("success"):
+                res["is_batch"] = False
+            return res
+
+        # Directory batch processing
+        valid_exts = {
+            ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
+            ".txt", ".csv", ".md", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"
+        }
+        files_to_convert = [
+            f for f in p.iterdir()
+            if f.is_file() and f.suffix.lower() in valid_exts and f.suffix.lower().lstrip(".") != target_fmt
+        ]
+
+        if not files_to_convert:
+            return {
+                "success": False,
+                "error": f"No convertible documents found in directory: {p}"
+            }
+
+        converted = []
+        errors = []
+        for f in files_to_convert:
+            try:
+                res = self.convert_file(f, target_fmt, out_dir, task_id=task_id)
+                if res.get("success"):
+                    converted.append({
+                        "original_filename": f.name,
+                        "converted_filename": res.get("filename"),
+                        "path": res.get("path"),
+                        "doc_id": res.get("doc_id"),
+                        "file_size": res.get("file_size", 0)
+                    })
+                else:
+                    errors.append({"file": f.name, "error": res.get("error")})
+            except Exception as e:
+                errors.append({"file": f.name, "error": str(e)})
+
+        batch_result = {
+            "success": len(converted) > 0,
+            "is_batch": True,
+            "source_folder": str(p),
+            "target_format": target_fmt.upper(),
+            "total_found": len(files_to_convert),
+            "converted_count": len(converted),
+            "converted_files": converted,
+            "errors": errors,
+            "message": f"Successfully converted {len(converted)} of {len(files_to_convert)} file(s) in '{p.name}' to {target_fmt.upper()} format."
+        }
+        if converted:
+            batch_result["filename"] = converted[0]["converted_filename"]
+            batch_result["path"] = converted[0]["path"]
+            batch_result["file_path"] = converted[0]["path"]
+            batch_result["doc_id"] = converted[0]["doc_id"]
+            batch_result["file_size"] = converted[0]["file_size"]
+        return batch_result
+
+    # --- Concrete Format Converters ---
+    def _convert_pdf_to_docx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx is not installed."}
+        if not HAS_PYPDF:
+            return {"success": False, "error": "pypdf is not installed."}
+
+        reader = pypdf.PdfReader(str(src))
+        doc = DocxDocument()
+
+        # Styles
+        title = src.stem.replace("_", " ").title()
+        p_title = doc.add_paragraph()
+        r_title = p_title.add_run(title)
+        r_title.bold = True
+        r_title.font.size = DocxPt(22)
+        r_title.font.color.rgb = DocxRGB(30, 58, 95)
+        p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        p_meta = doc.add_paragraph()
+        r_meta = p_meta.add_run(f"Converted from PDF: {src.name}  |  Pages: {len(reader.pages)}  |  Generated by Nexus Engine")
+        r_meta.italic = True
+        r_meta.font.size = DocxPt(9.5)
+        r_meta.font.color.rgb = DocxRGB(100, 116, 139)
+        p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph().paragraph_format.space_after = DocxPt(12)
+
+        for i, page in enumerate(reader.pages):
+            txt = page.extract_text() or ""
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            if not lines:
+                continue
+
+            h_page = doc.add_heading(f"Page {i + 1}", level=2)
+            h_page.paragraph_format.space_before = DocxPt(14)
+            h_page.paragraph_format.space_after = DocxPt(6)
+
+            for line in lines:
+                if line.startswith("•") or line.startswith("- ") or line.startswith("* "):
+                    clean_b = line.lstrip("•-* ").strip()
+                    doc.add_paragraph(clean_b, style='List Bullet')
+                else:
+                    doc.add_paragraph(line)
+
+            if i < len(reader.pages) - 1:
+                doc.add_page_break()
+
+        doc.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-docx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "DOCX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "DOCX",
+            "file_size": size,
+            "message": f"Successfully converted PDF '{src.name}' to Word (.docx) document."
+        }
+
+    def _convert_pdf_to_xlsx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+        if not HAS_PYPDF:
+            return {"success": False, "error": "pypdf is not installed."}
+
+        reader = pypdf.PdfReader(str(src))
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)  # remove default sheet
+
+        title = src.stem.replace("_", " ").title()
+        header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+        header_font = XlsxFont(name="Calibri", size=11, bold=True, color="FFFFFF")
+
+        for i, page in enumerate(reader.pages):
+            ws = wb.create_sheet(title=f"Page_{i + 1}")
+            txt = page.extract_text() or ""
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+
+            row_num = 1
+            for line in lines:
+                # Detect columns via tabs, pipes, or 2+ consecutive spaces
+                if "\t" in line:
+                    cols = [c.strip() for c in line.split("\t")]
+                elif "|" in line:
+                    cols = [c.strip() for c in line.split("|") if c.strip()]
+                elif re.search(r"\s{2,}", line):
+                    cols = [c.strip() for c in re.split(r"\s{2,}", line) if c.strip()]
+                else:
+                    cols = [line]
+
+                for col_idx, val in enumerate(cols, 1):
+                    cell = ws.cell(row=row_num, column=col_idx)
+                    # Attempt numeric cast
+                    try:
+                        if "." in val:
+                            cell.value = float(val.replace(",", ""))
+                        else:
+                            cell.value = int(val.replace(",", ""))
+                    except Exception:
+                        cell.value = val
+
+                    if row_num == 1:
+                        cell.fill = header_fill
+                        cell.font = header_font
+
+                row_num += 1
+
+            # Auto-fit column widths
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+        wb.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-xlsx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "XLSX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "XLSX",
+            "file_size": size,
+            "message": f"Successfully converted PDF '{src.name}' into structured Excel spreadsheet."
+        }
+
+    def _convert_pdf_to_pptx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_PYPDF:
+            return {"success": False, "error": "pypdf is not installed."}
+
+        reader = pypdf.PdfReader(str(src))
+        title = src.stem.replace("_", " ").title()
+
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+
+        # Slide 1: Cover
+        blank_layout = prs.slide_layouts[6]
+        s0 = prs.slides.add_slide(blank_layout)
+        bg = s0.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = RGBColor(11, 15, 25)
+        bg.line.fill.background()
+
+        t_box = s0.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.3), Inches(3.0))
+        tf = t_box.text_frame
+        p = tf.paragraphs[0]
+        p.text = title
+        p.font.name = "Segoe UI"
+        p.font.size = Pt(36)
+        p.font.bold = True
+        p.font.color.rgb = RGBColor(255, 255, 255)
+
+        p_sub = tf.add_paragraph()
+        p_sub.text = f"Deck Converted from PDF: {src.name}  |  {len(reader.pages)} Page(s)"
+        p_sub.font.name = "Segoe UI"
+        p_sub.font.size = Pt(16)
+        p_sub.font.color.rgb = RGBColor(56, 189, 248)
+
+        # Content Slides
+        for i, page in enumerate(reader.pages):
+            txt = page.extract_text() or ""
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            if not lines:
+                continue
+
+            slide = prs.slides.add_slide(blank_layout)
+            bg_s = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
+            bg_s.fill.solid()
+            bg_s.fill.fore_color.rgb = RGBColor(15, 23, 42)
+            bg_s.line.fill.background()
+
+            # Slide Header
+            h_box = slide.shapes.add_textbox(Inches(0.9), Inches(0.6), Inches(11.5), Inches(1.0))
+            htf = h_box.text_frame
+            hp = htf.paragraphs[0]
+            hp.text = f"PAGE {i + 1}  —  {lines[0][:50]}"
+            hp.font.name = "Segoe UI"
+            hp.font.size = Pt(22)
+            hp.font.bold = True
+            hp.font.color.rgb = RGBColor(255, 255, 255)
+
+            # Bento Cards / Bullets
+            body_lines = lines[1:10] if len(lines) > 1 else lines[:8]
+            c_box = slide.shapes.add_textbox(Inches(0.9), Inches(1.8), Inches(11.5), Inches(5.0))
+            ctf = c_box.text_frame
+            ctf.word_wrap = True
+
+            for b_idx, bl in enumerate(body_lines):
+                bp = ctf.paragraphs[0] if b_idx == 0 else ctf.add_paragraph()
+                bp.text = f"▸  {bl}"
+                bp.font.name = "Segoe UI"
+                bp.font.size = Pt(13.5)
+                bp.font.color.rgb = RGBColor(226, 232, 240)
+                bp.space_after = Pt(10)
+
+        prs.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-pptx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "PPTX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "PPTX",
+            "file_size": size,
+            "message": f"Successfully converted PDF '{src.name}' into PowerPoint (.pptx) presentation."
+        }
+
+    def _convert_docx_to_pdf(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx is not installed."}
+
+        doc = DocxDocument(str(src))
+        sections = []
+        current_heading = "Document Content"
+        current_paras = []
+
+        for p in doc.paragraphs:
+            txt = p.text.strip()
+            if not txt:
+                continue
+            if p.style and p.style.name and "Heading" in p.style.name:
+                if current_paras:
+                    sections.append({"heading": current_heading, "text": "\n".join(current_paras)})
+                    current_paras = []
+                current_heading = txt
+            else:
+                current_paras.append(txt)
+
+        if current_paras:
+            sections.append({"heading": current_heading, "text": "\n".join(current_paras)})
+
+        # Also extract any tables from docx
+        for tbl_idx, tbl in enumerate(doc.tables):
+            tbl_data = []
+            for row in tbl.rows:
+                tbl_data.append([c.text.strip() for c in row.cells])
+            if tbl_data:
+                sections.append({
+                    "heading": f"Table {tbl_idx + 1}",
+                    "text": "",
+                    "table": tbl_data
+                })
+
+        title = src.stem.replace("_", " ").title()
+        return self.create_pdf_report(title=title, filename=dest.name, sections=sections)
+
+    def _convert_xlsx_to_pdf(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+
+        wb = openpyxl.load_workbook(str(src), data_only=True)
+        sections = []
+        for sheet in wb.sheetnames:
+            ws = wb[sheet]
+            table_data = []
+            for row in ws.iter_rows(values_only=True):
+                r_vals = [str(v) if v is not None else "" for v in row]
+                if any(r_vals):
+                    table_data.append(r_vals)
+            if table_data:
+                sections.append({
+                    "heading": f"Sheet: {sheet}",
+                    "text": f"Tabular data extracted from worksheet '{sheet}' ({len(table_data)} rows).",
+                    "table": table_data
+                })
+
+        title = src.stem.replace("_", " ").title()
+        return self.create_pdf_report(title=title, filename=dest.name, sections=sections)
+
+    def _convert_xlsx_to_docx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        """
+        Converts an Excel workbook into a publication-grade, professionally styled Word document (.docx).
+        Preserves all tabular data rows, multi-level headers, numbers, and grand totals.
+        Applies Landscape orientation when columns > 6 so all data columns display clearly.
+        """
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx is not installed."}
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+
+        wb = openpyxl.load_workbook(str(src), data_only=True)
+        doc = DocxDocument()
+        title = src.stem.replace("_", " ").title()
+
+        # Measure max columns across all sheets to determine orientation
+        max_cols_all = 0
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            for row in ws.iter_rows(values_only=True):
+                if any(c is not None and str(c).strip() != "" for c in row):
+                    max_cols_all = max(max_cols_all, len(row))
+
+        section = doc.sections[0]
+        if max_cols_all > 6 and WD_ORIENT:
+            section.orientation = WD_ORIENT.LANDSCAPE
+            section.page_width = DocxInches(11.0)
+            section.page_height = DocxInches(8.5)
+            section.left_margin = DocxInches(0.5)
+            section.right_margin = DocxInches(0.5)
+            section.top_margin = DocxInches(0.5)
+            section.bottom_margin = DocxInches(0.5)
+        else:
+            section.top_margin = section.bottom_margin = DocxInches(0.7)
+            section.left_margin = section.right_margin = DocxInches(0.7)
+
+        # Title Header
+        p_title = doc.add_paragraph()
+        r_title = p_title.add_run(title)
+        r_title.font.name = "Calibri"
+        r_title.font.size = DocxPt(18)
+        r_title.font.bold = True
+        r_title.font.color.rgb = DocxRGB(0x0F, 0x17, 0x2A)
+        p_title.paragraph_format.space_before = DocxPt(0)
+        p_title.paragraph_format.space_after = DocxPt(2)
+
+        p_meta = doc.add_paragraph()
+        r_meta = p_meta.add_run(
+            f"Converted from Excel: {src.name}  •  Worksheets: {len(wb.sheetnames)}  •  {datetime.now().strftime('%B %d, %Y')}"
+        )
+        r_meta.font.name = "Calibri"
+        r_meta.font.size = DocxPt(9.5)
+        r_meta.font.color.rgb = DocxRGB(0x47, 0x55, 0x69)
+        p_meta.paragraph_format.space_after = DocxPt(10)
+
+        total_rows_converted = 0
+        for sheet_idx, sheet_name in enumerate(wb.sheetnames):
+            ws = wb[sheet_name]
+            all_rows = list(ws.iter_rows(values_only=True))
+
+            cleaned_rows = [list(r) for r in all_rows if any(c is not None and str(c).strip() != "" for c in r)]
+            if not cleaned_rows:
+                continue
+
+            total_rows_converted += len(cleaned_rows)
+            num_cols = max(len(r) for r in cleaned_rows)
+            for r in cleaned_rows:
+                if len(r) < num_cols:
+                    r.extend([None] * (num_cols - len(r)))
+
+            if len(wb.sheetnames) > 1:
+                p_sheet = doc.add_paragraph()
+                r_sheet = p_sheet.add_run(f"Worksheet: {sheet_name}")
+                r_sheet.font.name = "Calibri"
+                r_sheet.font.size = DocxPt(13)
+                r_sheet.font.bold = True
+                r_sheet.font.color.rgb = DocxRGB(0x1E, 0x3A, 0x8A)
+                p_sheet.paragraph_format.space_before = DocxPt(10)
+                p_sheet.paragraph_format.space_after = DocxPt(4)
+
+            # Determine header cutoff (first 1 to 3 rows)
+            header_cutoff = 1
+            for idx, r in enumerate(cleaned_rows[:4]):
+                f_val = str(r[0] or "").strip()
+                s_val = str(r[1] or "").strip()
+                if f_val == "1" and s_val not in ["2", ""]:
+                    header_cutoff = idx
+                    break
+                elif f_val == "1" and s_val == "2":
+                    header_cutoff = idx + 1
+                    break
+            header_cutoff = max(1, min(header_cutoff, 3))
+
+            table = doc.add_table(rows=len(cleaned_rows), cols=num_cols)
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            table.autofit = True
+
+            cell_font_size = DocxPt(7.5) if num_cols > 10 else (DocxPt(8.5) if num_cols > 6 else DocxPt(9.5))
+
+            for r_idx, row in enumerate(cleaned_rows):
+                r_str_lower = " ".join(str(c).lower() for c in row if c is not None)
+                is_header = (r_idx < header_cutoff)
+                is_total = ("grand total" in r_str_lower or "total" in r_str_lower) and not is_header
+
+                for c_idx in range(num_cols):
+                    cell = table.cell(r_idx, c_idx)
+                    val = row[c_idx] if c_idx < len(row) else None
+                    val_str = "" if val is None else str(val).strip()
+
+                    cell.text = val_str
+                    p = cell.paragraphs[0]
+                    p.paragraph_format.space_before = DocxPt(1)
+                    p.paragraph_format.space_after = DocxPt(1)
+
+                    if p.runs:
+                        r = p.runs[0]
+                        r.font.name = "Calibri"
+                        r.font.size = cell_font_size
+
+                        if is_header:
+                            r.font.bold = True
+                            r.font.color.rgb = DocxRGB(0xFF, 0xFF, 0xFF)
+                            shd_color = "0F172A" if r_idx == 0 else "1E293B"
+                            shd = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), shd_color))
+                            cell._tc.get_or_add_tcPr().append(shd)
+                        elif is_total:
+                            r.font.bold = True
+                            r.font.color.rgb = DocxRGB(0x0F, 0x17, 0x2A)
+                            shd = parse_xml(r'<w:shd {} w:fill="DBEAFE"/>'.format(nsdecls('w')))
+                            cell._tc.get_or_add_tcPr().append(shd)
+                        elif r_idx % 2 == 1:
+                            r.font.color.rgb = DocxRGB(0x1E, 0x29, 0x3B)
+                            shd = parse_xml(r'<w:shd {} w:fill="F8FAFC"/>'.format(nsdecls('w')))
+                            cell._tc.get_or_add_tcPr().append(shd)
+                        else:
+                            r.font.color.rgb = DocxRGB(0x1E, 0x29, 0x3B)
+
+                        borders = parse_xml(
+                            r'<w:tcBorders {}><w:top w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                            r'<w:left w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                            r'<w:bottom w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                            r'<w:right w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/></w:tcBorders>'.format(nsdecls('w'))
+                        )
+                        cell._tc.get_or_add_tcPr().append(borders)
+
+                        if val is not None and (isinstance(val, (int, float)) or (val_str.endswith('%') and any(ch.isdigit() for ch in val_str))):
+                            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        elif c_idx == 0 or (val_str.isdigit() and len(val_str) <= 3 and c_idx < 2):
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        else:
+                            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            if sheet_idx < len(wb.sheetnames) - 1:
+                doc.add_page_break()
+
+        doc.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-docx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "DOCX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "DOCX",
+            "file_size": size,
+            "message": f"Successfully converted Excel '{src.name}' into publication-grade Word document with full formatted table ({total_rows_converted} rows)."
+        }
+
+    def _convert_xlsx_to_pptx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        """Converts Excel workbook sheets into presentation slides."""
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+
+        wb = openpyxl.load_workbook(str(src), data_only=True)
+        title = src.stem.replace("_", " ").title()
+        slides = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            all_rows = list(ws.iter_rows(values_only=True))
+            cleaned_rows = [r for r in all_rows if any(c is not None and str(c).strip() != "" for c in r)]
+            cards = []
+            for r in cleaned_rows[:4]:
+                non_empty = [str(c) for c in r if c is not None and str(c).strip() != ""]
+                if non_empty:
+                    cards.append({"title": non_empty[0][:30], "description": " | ".join(non_empty[1:6])})
+            slides.append({
+                "title": f"Worksheet: {sheet_name}",
+                "cards": cards or [{"title": "Data Summary", "description": f"{len(cleaned_rows)} rows extracted."}]
+            })
+
+        return self.create_presentation(topic=title, filename=dest.name, slides_data=slides)
+
+    def _convert_csv_to_docx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        """Converts a CSV file into a publication-grade Word table."""
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx is not installed."}
+
+        rows = []
+        with open(src, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.reader(f)
+            for r in reader:
+                if any(c.strip() for c in r):
+                    rows.append(r)
+
+        if not rows:
+            return {"success": False, "error": "CSV file contains no readable data."}
+
+        doc = DocxDocument()
+        title = src.stem.replace("_", " ").title()
+        num_cols = max(len(r) for r in rows)
+
+        section = doc.sections[0]
+        if num_cols > 6 and WD_ORIENT:
+            section.orientation = WD_ORIENT.LANDSCAPE
+            section.page_width = DocxInches(11.0)
+            section.page_height = DocxInches(8.5)
+            section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = DocxInches(0.5)
+
+        p_t = doc.add_paragraph()
+        r_t = p_t.add_run(title)
+        r_t.font.name = "Calibri"
+        r_t.font.size = DocxPt(18)
+        r_t.font.bold = True
+        r_t.font.color.rgb = DocxRGB(0x0F, 0x17, 0x2A)
+
+        p_m = doc.add_paragraph()
+        r_m = p_m.add_run(f"Converted from CSV: {src.name}  •  {len(rows)} Records Extracted")
+        r_m.font.name = "Calibri"
+        r_m.font.size = DocxPt(9.5)
+        r_m.font.color.rgb = DocxRGB(0x47, 0x55, 0x69)
+        p_m.paragraph_format.space_after = DocxPt(10)
+
+        table = doc.add_table(rows=len(rows), cols=num_cols)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = True
+
+        for r_idx, row in enumerate(rows):
+            is_header = r_idx == 0
+            for c_idx in range(num_cols):
+                cell = table.cell(r_idx, c_idx)
+                val_str = row[c_idx] if c_idx < len(row) else ""
+                cell.text = val_str
+                p = cell.paragraphs[0]
+                p.paragraph_format.space_before = DocxPt(1)
+                p.paragraph_format.space_after = DocxPt(1)
+                if p.runs:
+                    r = p.runs[0]
+                    r.font.name = "Calibri"
+                    r.font.size = DocxPt(8.5)
+                    if is_header:
+                        r.font.bold = True
+                        r.font.color.rgb = DocxRGB(0xFF, 0xFF, 0xFF)
+                        shd = parse_xml(r'<w:shd {} w:fill="0F172A"/>'.format(nsdecls('w')))
+                        cell._tc.get_or_add_tcPr().append(shd)
+                    elif r_idx % 2 == 1:
+                        r.font.color.rgb = DocxRGB(0x1E, 0x29, 0x3B)
+                        shd = parse_xml(r'<w:shd {} w:fill="F8FAFC"/>'.format(nsdecls('w')))
+                        cell._tc.get_or_add_tcPr().append(shd)
+
+                    borders = parse_xml(
+                        r'<w:tcBorders {}><w:top w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                        r'<w:left w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                        r'<w:bottom w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/>'
+                        r'<w:right w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/></w:tcBorders>'.format(nsdecls('w'))
+                    )
+                    cell._tc.get_or_add_tcPr().append(borders)
+
+                    if val_str.replace(",", "").replace(".", "").isdigit() or val_str.endswith("%"):
+                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    else:
+                        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+        doc.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-docx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "DOCX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "DOCX",
+            "file_size": size,
+            "message": f"Successfully converted CSV '{src.name}' into Word document with full table."
+        }
+
+    def _convert_docx_to_xlsx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        """Converts a Word document's tables and paragraphs into an Excel workbook."""
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx is not installed."}
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+
+        doc = DocxDocument(str(src))
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        title = src.stem.replace("_", " ").title()
+
+        if doc.tables:
+            for t_idx, tbl in enumerate(doc.tables):
+                ws = wb.create_sheet(title=f"Table_{t_idx + 1}"[:30])
+                for r_idx, row in enumerate(tbl.rows, 1):
+                    for c_idx, cell in enumerate(row.cells, 1):
+                        cell_val = cell.text.strip()
+                        ws_cell = ws.cell(row=r_idx, column=c_idx)
+                        try:
+                            if "." in cell_val:
+                                ws_cell.value = float(cell_val)
+                            else:
+                                ws_cell.value = int(cell_val)
+                        except Exception:
+                            ws_cell.value = cell_val
+
+        paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        if paras or not doc.tables:
+            ws_text = wb.create_sheet(title="Document Text", index=0)
+            ws_text.cell(row=1, column=1, value="Extracted Content")
+            for r_idx, text in enumerate(paras, 2):
+                ws_text.cell(row=r_idx, column=1, value=text)
+
+        wb.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-xlsx-{uuid.uuid4().hex[:8]}"
+        save_generated_document(doc_id, dest.name, str(dest), "XLSX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "XLSX",
+            "file_size": size,
+            "message": f"Successfully converted Word document '{src.name}' into Excel spreadsheet."
+        }
+
+    def _convert_csv_to_xlsx(self, src: Path, dest: Path) -> Dict[str, Any]:
+        if not HAS_OPENPYXL:
+            return {"success": False, "error": "openpyxl is not installed."}
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = src.stem[:30]
+
+        with open(src, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.reader(f)
+            for r_idx, row in enumerate(reader, 1):
+                for c_idx, val in enumerate(row, 1):
+                    cell = ws.cell(row=r_idx, column=c_idx)
+                    try:
+                        if "." in val:
+                            cell.value = float(val)
+                        else:
+                            cell.value = int(val)
+                    except Exception:
+                        cell.value = val
+
+        wb.save(str(dest))
+        size = dest.stat().st_size
+        doc_id = f"doc-xlsx-{uuid.uuid4().hex[:8]}"
+        title = src.stem.replace("_", " ").title()
+        save_generated_document(doc_id, dest.name, str(dest), "XLSX", title, size)
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "path": str(dest),
+            "file_path": str(dest),
+            "filename": dest.name,
+            "file_type": "XLSX",
+            "file_size": size,
+            "message": f"Successfully converted CSV '{src.name}' to Excel (.xlsx)."
+        }
+
+    def _convert_text_to_format(self, src: Path, dest: Path, target_fmt: str) -> Dict[str, Any]:
+        txt = src.read_text(encoding="utf-8", errors="replace")
+        title = src.stem.replace("_", " ").title()
+
+        if target_fmt == "docx":
+            sections = [{"heading": "Content", "content": txt}]
+            return self.create_word_document(topic=title, filename=dest.name, sections=sections)
+        elif target_fmt == "pdf":
+            sections = [{"heading": "Content", "text": txt}]
+            return self.create_pdf_report(title=title, filename=dest.name, sections=sections)
+        elif target_fmt == "xlsx":
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            rows = [[ln] for ln in lines]
+            sheets = [{"name": "TextData", "headers": ["Line Content"], "rows": rows}]
+            return self.create_excel_spreadsheet(topic=title, filename=dest.name, sheets_data=sheets)
+        elif target_fmt == "pptx":
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            slides = [
+                {"title": title, "cards": [{"title": "Overview", "description": "\n".join(lines[:6])}]}
+            ]
+            return self.create_presentation(topic=title, filename=dest.name, slides_data=slides)
+        return {"success": False, "error": f"Unsupported conversion from text to {target_fmt}"}
+
+    def _convert_generic_via_text(self, src: Path, dest: Path, target_fmt: str) -> Dict[str, Any]:
+        extracted = self.extract_text(src)
+        if not extracted.get("success"):
+            return extracted
+        txt = extracted.get("text", "")
+        title = src.stem.replace("_", " ").title()
+
+        if target_fmt == "docx":
+            return self.create_word_document(topic=title, filename=dest.name, sections=[{"heading": "Extracted Content", "text": txt, "content": txt}])
+        elif target_fmt == "pdf":
+            return self.create_pdf_report(title=title, filename=dest.name, sections=[{"heading": "Extracted Content", "text": txt}])
+        elif target_fmt == "xlsx":
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            rows = [[ln] for ln in lines]
+            return self.create_excel_spreadsheet(topic=title, filename=dest.name, sheets_data=[{"name": "Content", "headers": ["Extracted Data"], "rows": rows}])
+        elif target_fmt == "pptx":
+            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+            return self.create_presentation(topic=title, filename=dest.name, slides_data=[{"title": title, "cards": [{"title": "Extracted Data", "description": "\n".join(lines[:6])}]}])
+        return {"success": False, "error": f"Cannot convert {src.suffix} to {target_fmt}"}
+
+    def _convert_image_to_pdf(self, src: Path, dest: Path, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """Converts an image file (PNG, JPG, WEBP, BMP, TIFF) directly to high-resolution PDF."""
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(src) as im:
+                if im.mode in ("RGBA", "LA", "P"):
+                    bg = PILImage.new("RGB", im.size, (255, 255, 255))
+                    if im.mode == "P":
+                        im = im.convert("RGBA")
+                    bg.paste(im, mask=im.split()[-1] if len(im.split()) == 4 else None)
+                    rgb_im = bg
+                else:
+                    rgb_im = im.convert("RGB")
+                rgb_im.save(str(dest), "PDF", resolution=100.0)
+
+            size = dest.stat().st_size
+            doc_id = f"doc-pdf-{uuid.uuid4().hex[:8]}"
+            title = src.stem.replace("_", " ").title()
+            save_generated_document(doc_id, dest.name, str(dest), "PDF", title, size, task_id=task_id)
+
+            return {
+                "success": True,
+                "doc_id": doc_id,
+                "path": str(dest),
+                "file_path": str(dest),
+                "filename": dest.name,
+                "file_type": "PDF",
+                "file_size": size,
+                "message": f"Successfully converted image '{src.name}' into PDF deliverable."
+            }
+        except Exception as e:
+            logger.error(f"Failed to convert image to PDF: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "source_file": src.name}
+
+    def _convert_image_to_docx(self, src: Path, dest: Path, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """Converts an image into a formatted Microsoft Word document (.docx)."""
+        if not HAS_DOCX:
+            return {"success": False, "error": "python-docx package is not installed."}
+
+        try:
+            doc = DocxDocument()
+            for section in doc.sections:
+                section.top_margin = DocxInches(0.6)
+                section.bottom_margin = DocxInches(0.6)
+                section.left_margin = DocxInches(0.6)
+                section.right_margin = DocxInches(0.6)
+
+            p_t = doc.add_paragraph()
+            r_t = p_t.add_run(src.stem.replace("_", " ").title())
+            r_t.font.name = "Calibri"
+            r_t.font.size = DocxPt(16)
+            r_t.font.bold = True
+            r_t.font.color.rgb = DocxRGB(0x0F, 0x17, 0x2A)
+            p_t.paragraph_format.space_after = DocxPt(12)
+
+            doc.add_picture(str(src), width=DocxInches(7.0))
+            doc.save(str(dest))
+
+            size = dest.stat().st_size
+            doc_id = f"doc-docx-{uuid.uuid4().hex[:8]}"
+            title = src.stem.replace("_", " ").title()
+            save_generated_document(doc_id, dest.name, str(dest), "DOCX", title, size, task_id=task_id)
+
+            return {
+                "success": True,
+                "doc_id": doc_id,
+                "path": str(dest),
+                "file_path": str(dest),
+                "filename": dest.name,
+                "file_type": "DOCX",
+                "file_size": size,
+                "message": f"Successfully converted image '{src.name}' into Word (.docx) document."
+            }
+        except Exception as e:
+            logger.error(f"Failed to convert image to DOCX: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "source_file": src.name}
+
+    def _convert_image_to_pptx(self, src: Path, dest: Path, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """Converts an image into a 16:9 widescreen PowerPoint presentation (.pptx)."""
+        try:
+            prs = Presentation()
+            prs.slide_width = Inches(13.333)
+            prs.slide_height = Inches(7.5)
+            blank_layout = prs.slide_layouts[6]
+            slide = prs.slides.add_slide(blank_layout)
+
+            from PIL import Image as PILImage
+            with PILImage.open(src) as im:
+                img_w, img_h = im.size
+
+            aspect = img_w / max(img_h, 1)
+            max_w = 11.5
+            max_h = 6.2
+            if aspect > (max_w / max_h):
+                w = max_w
+                h = max_w / aspect
+            else:
+                h = max_h
+                w = max_h * aspect
+
+            left = Inches((13.333 - w) / 2)
+            top = Inches((7.5 - h) / 2)
+            slide.shapes.add_picture(str(src), left, top, Inches(w), Inches(h))
+            prs.save(str(dest))
+
+            size = dest.stat().st_size
+            doc_id = f"doc-pptx-{uuid.uuid4().hex[:8]}"
+            title = src.stem.replace("_", " ").title()
+            save_generated_document(doc_id, dest.name, str(dest), "PPTX", title, size, task_id=task_id)
+
+            return {
+                "success": True,
+                "doc_id": doc_id,
+                "path": str(dest),
+                "file_path": str(dest),
+                "filename": dest.name,
+                "file_type": "PPTX",
+                "file_size": size,
+                "message": f"Successfully converted image '{src.name}' into PowerPoint (.pptx) presentation."
+            }
+        except Exception as e:
+            logger.error(f"Failed to convert image to PPTX: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "source_file": src.name}
 
     # =========================================================================
     # Fallback / Smart Content Synthesizers

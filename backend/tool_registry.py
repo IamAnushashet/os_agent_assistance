@@ -280,7 +280,8 @@ class ToolRegistry:
                 "topic": {"type": "string", "description": "Subject or topic of presentation"},
                 "filename": {"type": "string", "optional": True},
                 "slides_data": {"type": "array", "optional": True},
-                "theme": {"type": "string", "default": "cyber_sapphire"}
+                "theme": {"type": "string", "default": "cyber_sapphire"},
+                "task_id": {"type": "string", "optional": True}
             },
             category=ActionCategory.FILE_WRITE.value,
             risk_level=RiskLevel.LOW.value,
@@ -296,7 +297,8 @@ class ToolRegistry:
                 "title": {"type": "string", "description": "Report title or subject"},
                 "filename": {"type": "string", "optional": True},
                 "sections": {"type": "array", "optional": True},
-                "executive_summary": {"type": "string", "optional": True}
+                "executive_summary": {"type": "string", "optional": True},
+                "task_id": {"type": "string", "optional": True}
             },
             category=ActionCategory.FILE_WRITE.value,
             risk_level=RiskLevel.LOW.value,
@@ -312,7 +314,8 @@ class ToolRegistry:
                 "topic": {"type": "string", "description": "Subject or topic of Word document"},
                 "filename": {"type": "string", "optional": True},
                 "sections": {"type": "array", "optional": True},
-                "theme": {"type": "string", "default": "enterprise"}
+                "theme": {"type": "string", "default": "enterprise"},
+                "task_id": {"type": "string", "optional": True}
             },
             category=ActionCategory.FILE_WRITE.value,
             risk_level=RiskLevel.LOW.value,
@@ -328,12 +331,42 @@ class ToolRegistry:
                 "topic": {"type": "string", "description": "Subject or title of Excel spreadsheet"},
                 "filename": {"type": "string", "optional": True},
                 "sheets_data": {"type": "array", "optional": True},
-                "theme": {"type": "string", "default": "modern_blue"}
+                "theme": {"type": "string", "default": "modern_blue"},
+                "task_id": {"type": "string", "optional": True}
             },
             category=ActionCategory.FILE_WRITE.value,
             risk_level=RiskLevel.LOW.value,
             handler=file_agent.generate_excel_spreadsheet,
             completion_criterion="Excel .xlsx spreadsheet created."
+        ))
+
+        self.register(ToolDefinition(
+            name="file_convert_document",
+            agent="File Agent",
+            description="Converts an individual document (PDF, Word, Excel, PPTX, Text, Image) or an entire local folder of documents to a target format (docx, xlsx, pptx, pdf).",
+            parameters={
+                "source_path": {"type": "string", "description": "Path to a file or folder of files"},
+                "target_format": {"type": "string", "description": "Target format: docx, xlsx, pptx, pdf"},
+                "output_dir": {"type": "string", "optional": True, "description": "Optional destination directory"},
+                "task_id": {"type": "string", "optional": True}
+            },
+            category=ActionCategory.FILE_WRITE.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.convert_document,
+            completion_criterion="Document(s) successfully converted."
+        ))
+
+        self.register(ToolDefinition(
+            name="file_extract_text",
+            agent="File Agent",
+            description="Extracts readable text and tables from any PDF, Word, Excel, CSV, or Text file on disk.",
+            parameters={
+                "file_path": {"type": "string", "description": "Path to document on disk"}
+            },
+            category=ActionCategory.SAFE_READ.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.extract_document_text,
+            completion_criterion="Document text extracted."
         ))
 
         # ----------------- SYSTEM AGENT TOOLS -----------------

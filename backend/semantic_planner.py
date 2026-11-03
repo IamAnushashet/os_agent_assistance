@@ -83,6 +83,51 @@ class SemanticPlanner:
         p_lower = prompt.lower()
         steps: List[PlanStep] = []
 
+        # Case 0-Pre: File / Folder Conversion or Attached File Action
+        if any(w in p_lower for w in ["convert", "conversion", "transform"]) or (("to word" in p_lower or "to excel" in p_lower or "to ppt" in p_lower or "to pdf" in p_lower) and ("pdf" in p_lower or "file" in p_lower or "folder" in p_lower or "attached" in p_lower)) or "[attached file:" in p_lower:
+            target_fmt = "docx"
+            if "excel" in p_lower or "xlsx" in p_lower or "sheet" in p_lower:
+                target_fmt = "xlsx"
+            elif "ppt" in p_lower or "powerpoint" in p_lower or "slide" in p_lower:
+                target_fmt = "pptx"
+            elif "pdf" in p_lower and ("word to pdf" in p_lower or "to pdf" in p_lower):
+                target_fmt = "pdf"
+            elif "word" in p_lower or "docx" in p_lower or "doc" in p_lower:
+                target_fmt = "docx"
+
+            attach_match = re.search(r"\[Attached file:\s*([^\]]+)\]", prompt, flags=re.IGNORECASE)
+            quoted_match = re.search(r"[\"']([a-zA-Z]:\\[^\"']+|[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)[\"']", prompt)
+            drive_match = re.search(r"([a-zA-Z]:\\(?:[^<>:\"/\\|?*\n\r]+(?:\\[^<>:\"/\\|?*\n\r]+)*))", prompt)
+            file_match = re.search(r"([a-zA-Z0-9_\-./\\]+\.(?:pdf|docx|xlsx|pptx|txt|csv))", prompt, flags=re.IGNORECASE)
+
+            if attach_match:
+                source_path = attach_match.group(1).strip()
+            elif quoted_match:
+                source_path = quoted_match.group(1).strip()
+            elif drive_match:
+                source_path = drive_match.group(1).strip()
+            elif file_match:
+                source_path = file_match.group(1).strip()
+            elif "folder" in p_lower or "directory" in p_lower:
+                folder_match = re.search(r"(?:in|folder|directory|path|to)\s+([a-zA-Z0-9_.\-\\\/:]+)", prompt, flags=re.IGNORECASE)
+                source_path = folder_match.group(1).strip() if folder_match else "generated_documents"
+            else:
+                source_path = "uploads"
+
+            tool = tool_registry.get("file_convert_document")
+            steps.append(PlanStep(
+                step_number=1,
+                title=f"Convert document(s) at '{source_path}' to {target_fmt.upper()}",
+                agent=tool.agent,
+                tool_name=tool.name,
+                params={"source_path": source_path, "target_format": target_fmt},
+                category=tool.category,
+                risk_level=tool.risk_level,
+                reason=f"Convert document(s) from '{source_path}' into {target_fmt.upper()} format",
+                expected_outcome=f"Converted {target_fmt.upper()} file(s) created on disk"
+            ))
+            return SemanticPlan(goal=f"Convert {source_path} to {target_fmt.upper()}", strategy="Document Format Conversion", steps=steps)
+
         # Case 0A: PowerPoint Presentation Generation
         is_pptx = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", p_lower))
         if is_pptx:

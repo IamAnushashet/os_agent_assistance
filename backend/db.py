@@ -213,6 +213,11 @@ def list_tasks(limit: int = 50) -> List[Dict[str, Any]]:
                     d["plan"] = json.loads(d["plan_json"])
                 except Exception:
                     pass
+            if d.get("completion_report_json"):
+                try:
+                    d["completion_report"] = json.loads(d["completion_report_json"])
+                except Exception:
+                    pass
             tasks.append(d)
         return tasks
     finally:

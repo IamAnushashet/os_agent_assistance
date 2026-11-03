@@ -234,11 +234,12 @@ class FileAgent:
         topic: str,
         filename: Optional[str] = None,
         slides_data: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "cyber_sapphire"
+        theme: str = "cyber_sapphire",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generates a professional PowerPoint presentation with structured multi-slide content."""
         try:
-            return doc_generator.create_presentation(topic, filename, slides_data, theme)
+            return doc_generator.create_presentation(topic, filename, slides_data, theme, task_id=task_id)
         except Exception as e:
             logger.error(f"Failed to generate presentation: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
@@ -248,11 +249,12 @@ class FileAgent:
         title: str,
         filename: Optional[str] = None,
         sections: Optional[List[Dict[str, Any]]] = None,
-        executive_summary: Optional[str] = None
+        executive_summary: Optional[str] = None,
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generates a publication-grade PDF report with executive summary and structured data."""
         try:
-            return doc_generator.create_pdf_report(title, filename, sections, executive_summary)
+            return doc_generator.create_pdf_report(title, filename, sections, executive_summary, task_id=task_id)
         except Exception as e:
             logger.error(f"Failed to generate PDF: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
@@ -262,11 +264,12 @@ class FileAgent:
         topic: str,
         filename: Optional[str] = None,
         sections: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "enterprise"
+        theme: str = "enterprise",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generates a publication-grade Word document (.docx) with structured content and tables."""
         try:
-            return doc_generator.create_word_document(topic, filename, sections, theme)
+            return doc_generator.create_word_document(topic, filename, sections, theme, task_id=task_id)
         except Exception as e:
             logger.error(f"Failed to generate Word document: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
@@ -276,13 +279,40 @@ class FileAgent:
         topic: str,
         filename: Optional[str] = None,
         sheets_data: Optional[List[Dict[str, Any]]] = None,
-        theme: str = "modern_blue"
+        theme: str = "modern_blue",
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generates a professional Excel workbook (.xlsx) with styled sheets and KPI formula data."""
         try:
-            return doc_generator.create_excel_spreadsheet(topic, filename, sheets_data, theme)
+            return doc_generator.create_excel_spreadsheet(topic, filename, sheets_data, theme, task_id=task_id)
         except Exception as e:
             logger.error(f"Failed to generate Excel spreadsheet: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def convert_document(
+        self,
+        source_path: str,
+        target_format: str,
+        output_dir: Optional[str] = None,
+        task_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Converts an individual document (PDF, Word, Excel, PPTX, Text) or an entire local
+        folder of documents to a specified target format (docx, xlsx, pptx, pdf).
+        """
+        try:
+            out_p = Path(output_dir).resolve() if output_dir else None
+            return doc_generator.convert_batch(source_path, target_format, out_p, task_id=task_id)
+        except Exception as e:
+            logger.error(f"Failed to convert document(s): {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def extract_document_text(self, file_path: str) -> Dict[str, Any]:
+        """Extracts readable text and tables from any PDF, Word, Excel, CSV, or Text file."""
+        try:
+            return doc_generator.extract_text(file_path)
+        except Exception as e:
+            logger.error(f"Failed to extract document text: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
 

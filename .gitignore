@@ -35,6 +35,8 @@ htmlcov/
 
 # User runtime scratch & backups
 scratch/
+uploads/*
+!uploads/.gitkeep
 generated_documents/*
 !generated_documents/.gitkeep
 

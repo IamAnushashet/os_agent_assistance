@@ -239,6 +239,10 @@ class MultiAgentOrchestrator:
                         approval_id=appr_id
                     )
                     self.pending_approvals.pop(task_id, None)
+                    await self.broadcast_event(task_id, "APPROVAL_RESOLVED", {
+                        "approval_id": appr_id,
+                        "decision": decision.value
+                    })
 
                     if decision in [PermissionDecision.DENY, PermissionDecision.CANCEL]:
                         update_task_status(task_id, TaskState.CANCELLED)
@@ -254,6 +258,9 @@ class MultiAgentOrchestrator:
 
                 # Execute Registered Tool
                 t0 = time.time()
+                if tool_name.startswith("file_generate_") or tool_name.startswith("file_convert"):
+                    params.setdefault("task_id", task_id)
+
                 await self.broadcast_event(task_id, "ACTION_EXECUTING", {
                     "step_index": step_idx,
                     "agent": agent_name,
@@ -312,20 +319,23 @@ class MultiAgentOrchestrator:
             full_summary = " ".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
             spoken = speech_service.filter_text_for_speech(full_summary)
 
-            # If any action created a document, attach created_document directly to final_report
+            # If any action created or converted a document, attach created_document directly to final_report
             created_document = None
-            for a in executed_actions:
+            for a in reversed(executed_actions):
                 res = a.get("result", {})
-                if isinstance(res, dict) and (res.get("doc_id") or res.get("file_path") or res.get("filename")):
-                    created_document = {
-                        "doc_id": res.get("doc_id", ""),
-                        "filename": res.get("filename", ""),
-                        "file_path": str(res.get("file_path") or res.get("path") or ""),
-                        "file_type": res.get("file_type") or (res.get("filename", "").split(".")[-1].upper() if "." in res.get("filename", "") else ""),
-                        "title": res.get("title", ""),
-                        "size_bytes": res.get("file_size", 0)
-                    }
-                    break
+                if isinstance(res, dict):
+                    fname = res.get("filename") or ""
+                    is_doc = any(fname.lower().endswith(ext) for ext in [".pdf", ".pptx", ".docx", ".xlsx", ".txt", ".csv"])
+                    if res.get("doc_id") or (fname and is_doc):
+                        created_document = {
+                            "doc_id": res.get("doc_id", ""),
+                            "filename": fname or (Path(res.get("file_path") or res.get("path") or "document").name),
+                            "file_path": str(res.get("file_path") or res.get("path") or ""),
+                            "file_type": res.get("file_type") or (fname.split(".")[-1].upper() if "." in fname else "DOC"),
+                            "title": res.get("title", ""),
+                            "size_bytes": res.get("file_size", 0)
+                        }
+                        break
 
             final_report = {
                 "task_id": task_id,
@@ -339,13 +349,21 @@ class MultiAgentOrchestrator:
                 "created_document": created_document
             }
 
-            if created_document and (created_document.get("doc_id") or created_document.get("file_path")):
+            if created_document and (created_document.get("doc_id") or created_document.get("file_path") or created_document.get("filename")):
                 try:
+                    doc_id_val = created_document.get("doc_id") or ""
+                    fp_val = str(created_document.get("file_path") or "")
+                    fname_val = created_document.get("filename") or (Path(fp_val).name if fp_val else "")
                     conn = get_db_connection()
                     with conn:
                         conn.execute(
-                            "UPDATE generated_documents SET task_id = ? WHERE id = ? OR file_path = ?",
-                            (task_id, created_document.get("doc_id", ""), created_document.get("file_path", ""))
+                            """
+                            UPDATE generated_documents 
+                            SET task_id = ? 
+                            WHERE (id != '' AND id = ?) 
+                               OR (file_path != '' AND (file_path = ? OR file_path LIKE ? OR filename = ?))
+                            """,
+                            (task_id, doc_id_val, fp_val, f"%{fname_val}", fname_val)
                         )
                     conn.close()
                 except Exception:

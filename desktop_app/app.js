@@ -9,7 +9,20 @@ const API_BASE = window.location.origin.startsWith('http') ? window.location.ori
 let activeTaskId = null;
 let pollTimer = null;
 let telemetryTimer = null;
+let remoteSyncTimer = null;
 let isEmergencyStopped = false;
+let knownTaskIds = new Set();
+let sessionInitTime = Date.now();
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // DOM Elements — Command Deck
 const valCpu = document.getElementById('val-cpu');
@@ -43,6 +56,15 @@ const lanDisplay = document.getElementById('lan-display');
 const btnNewTask = document.getElementById('btn-new-task');
 const btnClearTasks = document.getElementById('btn-clear-tasks');
 
+// File Attachment DOM (ChatGPT style)
+const attachedFileBar = document.getElementById('attached-file-bar');
+const attachedFileIcon = document.getElementById('attached-file-icon');
+const attachedFileName = document.getElementById('attached-file-name');
+const attachedFileSize = document.getElementById('attached-file-size');
+const btnRemoveAttachment = document.getElementById('btn-remove-attachment');
+const btnAttach = document.getElementById('btn-attach');
+const fileInputAttach = document.getElementById('file-input-attach');
+
 // Browser Deck DOM
 const btnRefreshTabs = document.getElementById('btn-refresh-tabs');
 const tabsListContainer = document.getElementById('tabs-list-container');
@@ -65,6 +87,15 @@ const btnCreatePdf = document.getElementById('btn-create-pdf');
 const btnRefreshDocs = document.getElementById('btn-refresh-docs');
 const btnClearAllDocs = document.getElementById('btn-clear-all-docs');
 const docsGallery = document.getElementById('docs-gallery');
+
+// Universal Document Converter DOM
+const convertDropZone = document.getElementById('convert-drop-zone');
+const fileInputConvert = document.getElementById('file-input-convert');
+const convertSelectedFile = document.getElementById('convert-selected-file');
+const inputConvertPath = document.getElementById('input-convert-path');
+const btnExecuteConvert = document.getElementById('btn-execute-convert');
+const convertResultBox = document.getElementById('convert-result-box');
+const formatPills = document.querySelectorAll('.btn-fmt-pill');
 
 // Audit & Logs DOM
 const btnRefreshLogs = document.getElementById('btn-refresh-logs');
@@ -113,6 +144,10 @@ const inputGroqKey = document.getElementById('input-groq-key');
 const inputPin = document.getElementById('input-pin');
 const selectVoice = document.getElementById('select-voice');
 
+// Attachment and Converter Global State
+let currentAttachedFile = null; // { filename, path, size_bytes }
+let selectedTargetFormat = 'docx';
+
 // =========================================================================
 // 1. INITIALIZATION & TELEMETRY
 // =========================================================================
@@ -127,8 +162,22 @@ async function init() {
   await loadBrowserTabs();
   await loadAuditLogs();
 
+  // Pre-seed knownTaskIds with past inactive tasks so we don't duplicate on reload
+  try {
+    const initTasksRes = await fetch(`${API_BASE}/api/tasks?limit=20`);
+    if (initTasksRes.ok) {
+      const initData = await initTasksRes.json();
+      (initData.tasks || []).forEach(t => {
+        if (t.status !== 'RUNNING' && t.status !== 'AWAITING_APPROVAL') {
+          knownTaskIds.add(t.id);
+        }
+      });
+    }
+  } catch (e) {}
+
   // Polling intervals
   telemetryTimer = setInterval(updateTelemetry, 3000);
+  remoteSyncTimer = setInterval(syncRemoteTasks, 1500);
 }
 
 async function fetchStatusAndNetwork() {
@@ -209,16 +258,25 @@ function setupTabs() {
 // 3. CONSOLE & PROMPT EXECUTION
 // =========================================================================
 async function submitPrompt(text) {
-  const prompt = (text || promptInput.value || hudInput.value).trim();
-  if (!prompt) return;
+  const rawInput = (text || promptInput.value || hudInput.value).trim();
+  if (!rawInput && !currentAttachedFile) return;
+
+  // Compose full instruction incorporating any attached file (ChatGPT style)
+  let fullPrompt = rawInput;
+  let displayPrompt = rawInput;
+  if (currentAttachedFile) {
+    fullPrompt = `[Attached file: ${currentAttachedFile.path}]\n${rawInput || "Convert this file or summarize its contents"}`;
+    displayPrompt = `📎 ${currentAttachedFile.filename}\n${rawInput || "Convert this file or summarize its contents"}`;
+    clearAttachedFile();
+  }
 
   welcomeCard.style.display = 'none';
-  appendUserMessage(prompt);
+  appendUserMessage(displayPrompt);
   promptInput.value = '';
   hudInput.value = '';
 
   const permMode = selectPermissionMode.value;
-  const taskCard = createTaskCard(prompt);
+  const taskCard = createTaskCard(rawInput || (currentAttachedFile ? currentAttachedFile.filename : "Mission"));
   messageThread.appendChild(taskCard);
   chatViewport.scrollTop = chatViewport.scrollHeight;
 
@@ -227,12 +285,13 @@ async function submitPrompt(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: fullPrompt }],
         permission_mode: permMode
       })
     });
     const data = await res.json();
     activeTaskId = data.task_id;
+    knownTaskIds.add(activeTaskId);
     pollTaskStatus(activeTaskId, taskCard);
     loadRecentTasks();
   } catch (e) {
@@ -241,11 +300,69 @@ async function submitPrompt(text) {
   }
 }
 
-function appendUserMessage(text) {
+function appendUserMessage(text, isRemote = false) {
   const msg = document.createElement('div');
   msg.className = 'message-user';
-  msg.innerText = text;
+  if (isRemote) {
+    msg.innerHTML = `
+      <div style="font-size:10.5px; color:#38bdf8; font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:5px; text-transform:uppercase; letter-spacing:0.5px;">
+        <span>📱</span>
+        <span>Phone Remote Command</span>
+      </div>
+      <div>${text}</div>
+    `;
+  } else {
+    msg.innerText = text;
+  }
   messageThread.appendChild(msg);
+}
+
+async function syncRemoteTasks() {
+  try {
+    const res = await fetch(`${API_BASE}/api/tasks?limit=5`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const tasks = data.tasks || [];
+    if (tasks.length === 0) return;
+
+    for (const t of tasks) {
+      if (knownTaskIds.has(t.id)) continue;
+
+      let taskTime = 0;
+      if (t.created_at) {
+        taskTime = new Date(t.created_at.replace(' ', 'T') + 'Z').getTime();
+      }
+      const isNewSessionTask = taskTime >= (sessionInitTime - 5000);
+      const isRunning = ['RUNNING', 'AWAITING_APPROVAL', 'QUEUED'].includes(t.status);
+
+      if (isRunning || isNewSessionTask) {
+        knownTaskIds.add(t.id);
+        activeTaskId = t.id;
+
+        // Auto-switch to Console view so desktop user immediately sees the activity
+        const consoleTab = document.querySelector('[data-tab="tab-console"]');
+        if (consoleTab && !consoleTab.classList.contains('active')) {
+          consoleTab.click();
+        }
+        welcomeCard.style.display = 'none';
+
+        // Render user prompt with Phone Remote indicator
+        appendUserMessage(t.user_prompt, true);
+
+        // Mount live task card
+        const card = createTaskCard(t.user_prompt);
+        card.id = `task-card-${t.id}`;
+        card.querySelector('.task-id-badge').innerText = `TASK // ${t.id}`;
+        messageThread.appendChild(card);
+        chatViewport.scrollTop = chatViewport.scrollHeight;
+
+        // Start polling this task until finished
+        pollTaskStatus(t.id, card);
+        loadRecentTasks();
+        break;
+      }
+    }
+  } catch (e) {}
 }
 
 function createTaskCard(prompt) {
@@ -317,14 +434,22 @@ function pollTaskStatus(taskId, card) {
       }
 
       // Check for approval requirements
+      const existingAppBox = card.querySelector('.approval-box');
       if (task.status === 'AWAITING_APPROVAL' && task.pending_approval) {
         renderApprovalPrompt(card, task.pending_approval);
+      } else if (existingAppBox && task.status !== 'AWAITING_APPROVAL') {
+        // If task transitioned out of approval state, remove the prompt
+        existingAppBox.remove();
       }
 
       // Finished States
       if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status)) {
         clearInterval(pollTimer);
         pollTimer = null;
+
+        // Ensure approval box is cleaned up if lingering
+        const lingeringAppBox = card.querySelector('.approval-box');
+        if (lingeringAppBox) lingeringAppBox.remove();
 
         const summaryBox = card.querySelector('.task-summary-box');
         summaryBox.classList.remove('hidden');
@@ -375,12 +500,23 @@ async function checkForCreatedDocument(card, task) {
       const res = await fetch(`${API_BASE}/api/documents`);
       const data = await res.json();
       if (data.documents && data.documents.length > 0) {
-        const matched = data.documents.find(d => d.task_id === task.id);
-        if (matched) {
-          targetDoc = matched;
-        } else {
+        const taskId = task ? (task.id || task.task_id) : null;
+        if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
+          const matched = data.documents.find(d => d.task_id && d.task_id === taskId);
+          if (matched) {
+            targetDoc = matched;
+          }
+        }
+        if (!targetDoc) {
           const summaryStr = (report.summary || '').toLowerCase();
-          const foundInSummary = data.documents.find(d => d.filename && summaryStr.includes(d.filename.toLowerCase()));
+          const promptStr = (task.user_prompt || '').toLowerCase();
+          const foundInSummary = data.documents.find(d => {
+            if (!d.filename || typeof d.filename !== 'string' || d.filename.length < 5) return false;
+            const fnLower = d.filename.toLowerCase();
+            const stemLower = fnLower.replace(/\.[^/.]+$/, "");
+            return (summaryStr.length > 0 && (summaryStr.includes(fnLower) || summaryStr.includes(stemLower))) ||
+                   (promptStr.length > 0 && (promptStr.includes(fnLower) || promptStr.includes(stemLower)));
+          });
           if (foundInSummary) {
             targetDoc = foundInSummary;
           }
@@ -389,8 +525,13 @@ async function checkForCreatedDocument(card, task) {
     } catch (e) {}
   }
 
-  // If no document was created by this task, do not display shelf
+  // If no document was created by this task, ensure shelf card is hidden and cleared
   if (!targetDoc) {
+    const docCard = card.querySelector('.created-doc-card');
+    if (docCard) {
+      docCard.classList.add('hidden');
+      docCard.innerHTML = '';
+    }
     return;
   }
 
@@ -438,38 +579,96 @@ function renderApprovalPrompt(card, approval) {
   if (!appBox) {
     appBox = document.createElement('div');
     appBox.className = 'approval-box';
-    appBox.style = "background:rgba(245, 158, 11, 0.08); border:1px solid rgba(245, 158, 11, 0.35); padding:14px; border-radius:8px; margin-top:12px;";
+    appBox.style = "background:rgba(245, 158, 11, 0.08); border:1px solid rgba(245, 158, 11, 0.35); padding:14px; border-radius:8px; margin-top:12px; transition: all 0.3s ease;";
     card.appendChild(appBox);
   }
+
+  const apprId = approval.id || approval.approval_id;
+  // If user already clicked an authorization decision on this card, preserve resolving UI
+  if (appBox.dataset.apprId === apprId && appBox.dataset.status === 'resolving') {
+    return;
+  }
+  appBox.dataset.apprId = apprId;
 
   const tool = approval.tool || approval.tool_name || "System Operation";
   const title = approval.title || approval.reason || `Execute ${tool}`;
   const risk = approval.risk_level || "MEDIUM";
-  const apprId = approval.id || approval.approval_id;
 
   appBox.innerHTML = `
     <div style="font-size:12px; font-weight:700; color:#fbbf24; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
       <span>⚠️</span>
       <span>ACTION REQUIRES AUTHORIZATION</span>
     </div>
-    <div style="font-size:12.5px; color:#f8fafc; font-weight:600; margin-bottom:4px;">${title}</div>
-    <div style="font-size:11px; color:#94a3b8; margin-bottom:12px;">Tool: <code style="color:#cbd5e1;">${tool}</code> &bull; Risk Level: <span style="color:#f59e0b; font-weight:600;">${risk}</span></div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="btn-accent-action" onclick="resolveApproval('${apprId}', 'allow_once')">Allow Once</button>
-      <button class="btn-secondary-action" onclick="resolveApproval('${apprId}', 'allow_session')">Allow for Session</button>
-      <button class="btn-emergency" onclick="resolveApproval('${apprId}', 'deny')">Deny</button>
+    <div style="font-size:12.5px; color:#f8fafc; font-weight:600; margin-bottom:4px;">${escapeHtml(title)}</div>
+    <div style="font-size:11px; color:#94a3b8; margin-bottom:12px;">Tool: <code style="color:#cbd5e1;">${escapeHtml(tool)}</code> &bull; Risk Level: <span style="color:#f59e0b; font-weight:600;">${escapeHtml(risk)}</span></div>
+    <div class="approval-btn-group" style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn-accent-action" onclick="resolveApproval('${apprId}', 'allow_once', this)">Allow Once</button>
+      <button class="btn-secondary-action" onclick="resolveApproval('${apprId}', 'allow_session', this)">Allow for Session</button>
+      <button class="btn-emergency" onclick="resolveApproval('${apprId}', 'deny', this)">Deny</button>
     </div>
   `;
 }
 
-async function resolveApproval(approvalId, decision) {
+async function resolveApproval(approvalId, decision, btnEl) {
+  const appBox = document.querySelector(`.approval-box[data-appr-id="${approvalId}"]`) ||
+                 (btnEl ? btnEl.closest('.approval-box') : document.querySelector('.approval-box'));
+
+  const actionText = decision === 'allow_once' ? 'Allow Once' : decision === 'allow_session' ? 'Allow for Session' : 'Deny';
+  const isAllow = decision !== 'deny';
+  const badgeColor = isAllow ? '#10b981' : '#ef4444';
+  const badgeIcon = isAllow ? '✓' : '✕';
+
+  if (appBox) {
+    appBox.dataset.status = 'resolving';
+    // Immediately disable buttons to prevent duplicate triggers
+    const buttons = appBox.querySelectorAll('button');
+    buttons.forEach(b => {
+      b.disabled = true;
+      b.style.pointerEvents = 'none';
+      b.style.opacity = '0.5';
+    });
+
+    const btnGroup = appBox.querySelector('.approval-btn-group');
+    if (btnGroup) {
+      btnGroup.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px; padding:7px 12px; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid ${badgeColor};">
+          <span style="font-size:13px; font-weight:bold; color:${badgeColor};">${badgeIcon}</span>
+          <span style="font-size:12px; color:${badgeColor}; font-weight:600;">
+            ${isAllow ? 'Authorized' : 'Rejected'}: Submitting "${actionText}"...
+          </span>
+        </div>
+      `;
+    }
+  }
+
   try {
-    await fetch(`${API_BASE}/api/approvals/${approvalId}/decision`, {
+    const res = await fetch(`${API_BASE}/api/approvals/${approvalId}/decision`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision })
     });
-  } catch (e) {}
+
+    if (res.ok) {
+      // Fade out and remove smoothly once acknowledged
+      if (appBox) {
+        setTimeout(() => {
+          appBox.style.transition = 'all 0.3s ease-out';
+          appBox.style.opacity = '0';
+          appBox.style.transform = 'translateY(-6px)';
+          setTimeout(() => {
+            if (appBox && appBox.parentNode) {
+              appBox.remove();
+            }
+          }, 300);
+        }, 400);
+      }
+    }
+  } catch (e) {
+    if (appBox) {
+      appBox.dataset.status = 'error';
+      appBox.innerHTML += `<div style="font-size:11px; color:#ef4444; margin-top:8px;">⚠️ Network error: Could not reach assistant server.</div>`;
+    }
+  }
 }
 
 async function playTts(encodedText) {
@@ -870,6 +1069,247 @@ async function createXlsxDirect() {
 }
 
 // =========================================================================
+// 5A-1. CHAT FILE ATTACHMENT & CONVERTER CONTROLS (ChatGPT Style)
+// =========================================================================
+function getFileIcon(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '📑';
+  if (ext === 'docx' || ext === 'doc') return '📝';
+  if (ext === 'xlsx' || ext === 'xls') return '📈';
+  if (ext === 'pptx' || ext === 'ppt') return '📊';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return '🖼️';
+  if (['csv', 'txt', 'md', 'json'].includes(ext)) return '📄';
+  return '📎';
+}
+
+async function uploadFileForAttachment(file) {
+  if (!file) return;
+  try {
+    if (attachedFileBar) {
+      attachedFileIcon.innerText = '⏳';
+      attachedFileName.innerText = `Uploading ${file.name}...`;
+      attachedFileSize.innerText = `${Math.round(file.size / 1024)} KB`;
+      attachedFileBar.classList.remove('hidden');
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/files/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(`Upload failed: ${err.detail || 'Unknown error'}`);
+      clearAttachedFile();
+      return;
+    }
+    const data = await res.json();
+    currentAttachedFile = {
+      filename: data.filename,
+      path: data.path,
+      size_bytes: data.size_bytes
+    };
+    if (attachedFileBar) {
+      attachedFileIcon.innerText = getFileIcon(data.filename);
+      attachedFileName.innerText = data.filename;
+      attachedFileSize.innerText = `${Math.round(data.size_bytes / 1024)} KB`;
+      attachedFileBar.classList.remove('hidden');
+    }
+    showToast(`📎 Attached: ${data.filename}`);
+  } catch (e) {
+    alert(`File upload error: ${e.message}`);
+    clearAttachedFile();
+  }
+}
+
+function clearAttachedFile() {
+  currentAttachedFile = null;
+  if (fileInputAttach) fileInputAttach.value = '';
+  if (attachedFileBar) attachedFileBar.classList.add('hidden');
+}
+
+function setupChatAttachmentEvents() {
+  if (btnAttach && fileInputAttach) {
+    btnAttach.addEventListener('click', () => fileInputAttach.click());
+    fileInputAttach.addEventListener('change', async () => {
+      const f = fileInputAttach.files[0];
+      if (f) await uploadFileForAttachment(f);
+    });
+  }
+
+  if (btnRemoveAttachment) {
+    btnRemoveAttachment.addEventListener('click', clearAttachedFile);
+  }
+
+  // Drag and drop onto prompt container / chat viewport
+  const dropTargets = [document.querySelector('.input-glass-box'), chatViewport];
+  dropTargets.forEach(target => {
+    if (!target) return;
+    ['dragenter', 'dragover'].forEach(eventName => {
+      target.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (target.classList.contains('input-glass-box')) {
+          target.style.borderColor = '#38bdf8';
+          target.style.boxShadow = '0 0 16px rgba(56, 189, 248, 0.35)';
+        }
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      target.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (target.classList.contains('input-glass-box')) {
+          target.style.borderColor = '';
+          target.style.boxShadow = '';
+        }
+      }, false);
+    });
+
+    target.addEventListener('drop', async (e) => {
+      const dt = e.dataTransfer;
+      if (dt.files && dt.files.length > 0) {
+        await uploadFileForAttachment(dt.files[0]);
+      }
+    });
+  });
+}
+
+function setupConverterControls() {
+  // Format Pills
+  if (formatPills && formatPills.length > 0) {
+    formatPills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        formatPills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        selectedTargetFormat = pill.getAttribute('data-fmt') || 'docx';
+      });
+    });
+  }
+
+  // Drop Zone
+  if (convertDropZone && fileInputConvert) {
+    convertDropZone.addEventListener('click', (e) => {
+      if (e.target !== fileInputConvert) {
+        fileInputConvert.click();
+      }
+    });
+
+    fileInputConvert.addEventListener('change', async () => {
+      const f = fileInputConvert.files[0];
+      if (f) await handleConverterUpload(f);
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      convertDropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        convertDropZone.style.borderColor = '#38bdf8';
+        convertDropZone.style.background = 'rgba(56, 189, 248, 0.1)';
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      convertDropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        convertDropZone.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+        convertDropZone.style.background = 'rgba(30, 41, 59, 0.3)';
+      }, false);
+    });
+
+    convertDropZone.addEventListener('drop', async (e) => {
+      const dt = e.dataTransfer;
+      const f = dt.files[0];
+      if (f) await handleConverterUpload(f);
+    });
+  }
+
+  if (btnExecuteConvert) {
+    btnExecuteConvert.addEventListener('click', executeDocumentConversion);
+  }
+}
+
+async function handleConverterUpload(file) {
+  try {
+    if (convertSelectedFile) convertSelectedFile.innerText = `Uploading ${file.name}...`;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/files/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      if (convertSelectedFile) convertSelectedFile.innerText = `Upload failed: ${err.detail || 'Error'}`;
+      return;
+    }
+    const data = await res.json();
+    if (inputConvertPath) inputConvertPath.value = data.path;
+    if (convertSelectedFile) {
+      convertSelectedFile.innerText = `Ready: ${data.filename} (${Math.round(data.size_bytes / 1024)} KB)`;
+    }
+  } catch (e) {
+    if (convertSelectedFile) convertSelectedFile.innerText = `Upload error: ${e.message}`;
+  }
+}
+
+async function executeDocumentConversion() {
+  const sourcePath = (inputConvertPath ? inputConvertPath.value : '').trim();
+  if (!sourcePath) {
+    showConvertResult('Please upload a file or enter a local folder / file path to convert.', false);
+    return;
+  }
+
+  if (btnExecuteConvert) {
+    btnExecuteConvert.disabled = true;
+    btnExecuteConvert.innerHTML = '<span>⏳</span><span>Converting...</span>';
+  }
+  showConvertResult('Processing document conversion with native engines...', true, true);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/files/convert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_path: sourcePath,
+        target_format: selectedTargetFormat
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const msg = data.is_batch
+        ? `Batch conversion complete: Converted ${data.converted_count} file(s) to ${selectedTargetFormat.toUpperCase()}.`
+        : `Successfully converted to ${selectedTargetFormat.toUpperCase()}: ${data.filename || 'Deliverable ready'}.`;
+      showConvertResult(msg, true);
+      await loadDocuments();
+      showToast(`⚡ Conversion complete: ${selectedTargetFormat.toUpperCase()}`);
+    } else {
+      showConvertResult(`Conversion failed: ${data.error || 'Unknown error'}`, false);
+    }
+  } catch (e) {
+    showConvertResult(`Conversion error: ${e.message}`, false);
+  } finally {
+    if (btnExecuteConvert) {
+      btnExecuteConvert.disabled = false;
+      btnExecuteConvert.innerHTML = '<span>⚡</span><span>Convert Document(s)</span>';
+    }
+  }
+}
+
+function showConvertResult(msg, success, isPending = false) {
+  if (!convertResultBox) return;
+  convertResultBox.classList.remove('hidden');
+  const bg = isPending ? 'rgba(56, 189, 248, 0.1)' : (success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)');
+  const border = isPending ? '#38bdf8' : (success ? '#10b981' : '#ef4444');
+  const color = isPending ? '#38bdf8' : (success ? '#34d399' : '#f87171');
+  const icon = isPending ? '⏳' : (success ? '✅' : '❌');
+  convertResultBox.style = `background:${bg}; border:1px solid ${border}; border-radius:6px; padding:10px 14px; font-size:12px; color:${color}; margin-top:12px;`;
+  convertResultBox.innerHTML = `<span>${icon}</span> <span style="margin-left:6px;">${msg}</span>`;
+}
+
+// =========================================================================
 // 5B. AUDIT & LOGS VIEWER
 // =========================================================================
 async function loadAuditLogs() {
@@ -1135,24 +1575,37 @@ async function clearAllTasks() {
   }
 }
 
-function renderPastTask(task) {
+async function renderPastTask(task) {
   document.querySelector('[data-tab="tab-console"]').click();
   welcomeCard.style.display = 'none';
   messageThread.innerHTML = '';
   appendUserMessage(task.user_prompt);
 
-  const card = createTaskCard(task.user_prompt);
-  card.querySelector('.task-id-badge').innerText = `TASK // ${task.id}`;
+  // Fetch full task details to guarantee complete completion_report and actions
+  let fullTask = task;
+  try {
+    const res = await fetch(`${API_BASE}/api/tasks/${task.id}`);
+    if (res.ok) {
+      fullTask = await res.json();
+    }
+  } catch (e) {}
+
+  const card = createTaskCard(fullTask.user_prompt);
+  card.querySelector('.task-id-badge').innerText = `TASK // ${fullTask.id}`;
   const statusBadge = card.querySelector('.task-status');
-  statusBadge.innerText = task.status;
-  statusBadge.className = `task-status ${task.status.toLowerCase()}`;
+  statusBadge.innerText = fullTask.status;
+  statusBadge.className = `task-status ${fullTask.status.toLowerCase()}`;
 
   const summaryBox = card.querySelector('.task-summary-box');
   summaryBox.classList.remove('hidden');
-  const report = task.completion_report || {};
-  summaryBox.innerHTML = `<div>${report.summary || task.error_message || 'Completed.'}</div>`;
+  const report = fullTask.completion_report || {};
+  const summaryText = report.summary || fullTask.error_message || 'Completed.';
+  summaryBox.innerHTML = `
+    <div>${summaryText}</div>
+    <button class="btn-mini-new" style="margin-top:8px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
+  `;
 
-  checkForCreatedDocument(card, task);
+  await checkForCreatedDocument(card, fullTask);
   messageThread.appendChild(card);
 }
 
@@ -1267,6 +1720,10 @@ function setupEventListeners() {
   if (btnClearTasks) {
     btnClearTasks.addEventListener('click', clearAllTasks);
   }
+
+  // Setup Attachment and Converter Controls
+  setupChatAttachmentEvents();
+  setupConverterControls();
 
   // Speech Web Speech API fallback
   if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {

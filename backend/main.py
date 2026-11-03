@@ -9,17 +9,19 @@ import logging
 import os
 import psutil
 import subprocess
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import settings, update_env, PROJECT_ROOT, OUTPUT_DOCS_DIR
+from config import settings, update_env, PROJECT_ROOT, OUTPUT_DOCS_DIR, UPLOADS_DIR
 from db import (
     init_db, list_tasks, get_task, get_task_events, get_recent_audit_logs, clear_audit_logs,
     delete_task, clear_all_tasks, update_task_title,
@@ -177,9 +179,9 @@ def list_generated_documents():
     Combines SQLite registry with physical folder reconciliation.
     Strictly ignores temporary/lock files (e.g. ~$*.pptx).
     """
-    # 1. Check existing DB records first to prevent resetting timestamps
+    # 1. Check existing DB records first to prevent resetting timestamps or clearing task_id
     existing_docs = db_list_docs(limit=100)
-    existing_paths = {d["file_path"] for d in existing_docs}
+    existing_paths = {str(Path(d["file_path"]).resolve()).lower() for d in existing_docs if d.get("file_path")}
 
     # 2. Auto-register only unrecorded physical files in OUTPUT_DOCS_DIR
     if OUTPUT_DOCS_DIR.exists():
@@ -190,7 +192,7 @@ def list_generated_documents():
             if f.name.startswith("~$") or f.name.startswith(".") or f.name.startswith("~"):
                 continue
             fpath_str = str(f.resolve())
-            if fpath_str not in existing_paths and f.suffix.lower() in [".pptx", ".pdf", ".docx", ".xlsx", ".txt"]:
+            if fpath_str.lower() not in existing_paths and f.suffix.lower() in [".pptx", ".pdf", ".docx", ".xlsx", ".txt", ".png", ".jpg", ".jpeg"]:
                 try:
                     db_save_doc(
                         doc_id=f"doc-{f.stem[:12]}-{hex(abs(hash(fpath_str)))[2:8]}",
@@ -494,6 +496,97 @@ def generate_document_endpoint(req: GenerateDocRequest):
         return file_agent.generate_excel_spreadsheet(topic=req.topic, filename=req.filename)
     else:
         return file_agent.generate_pdf(title=req.topic, filename=req.filename)
+
+
+class ConvertDocRequest(BaseModel):
+    source_path: str
+    target_format: str
+    output_dir: Optional[str] = None
+
+
+class ExtractTextRequest(BaseModel):
+    file_path: Optional[str] = None
+    path: Optional[str] = None
+
+
+@app.post("/api/files/upload")
+async def upload_file_endpoint(file: UploadFile = File(...)):
+    """
+    Uploads a user file (PDF, Word, Excel, PPTX, text, image) into the uploads directory.
+    Enables ChatGPT-style file attachments for direct conversion and multimodal analysis.
+    """
+    try:
+        raw_name = Path(file.filename).name
+        clean_name = "".join(c for c in raw_name if c.isalnum() or c in (" ", "_", "-", ".")).strip()
+        if not clean_name:
+            clean_name = f"upload_{uuid.uuid4().hex[:8]}.bin"
+
+        dest = UPLOADS_DIR / clean_name
+        if dest.exists():
+            stem = dest.stem
+            ext = dest.suffix
+            dest = UPLOADS_DIR / f"{stem}_{int(time.time())}{ext}"
+
+        content = await file.read()
+        dest.write_bytes(content)
+        size = len(content)
+
+        logger.info(f"File uploaded successfully: {dest.name} ({size} bytes)")
+        return {
+            "success": True,
+            "filename": dest.name,
+            "path": str(dest.resolve()),
+            "size_bytes": size,
+            "content_type": file.content_type,
+            "message": f"File '{dest.name}' uploaded successfully."
+        }
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/files/uploads")
+def list_uploaded_files():
+    """Lists files currently residing in the uploads directory."""
+    files = []
+    if UPLOADS_DIR.exists():
+        for f in sorted(UPLOADS_DIR.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file() and f.name != ".gitkeep":
+                files.append({
+                    "filename": f.name,
+                    "name": f.name,
+                    "path": str(f.resolve()),
+                    "size_bytes": f.stat().st_size,
+                    "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+                })
+    return {"success": True, "uploads": files, "count": len(files)}
+
+
+@app.post("/api/files/convert")
+def convert_document_endpoint(req: ConvertDocRequest):
+    """
+    Converts an individual document or an entire local folder to a target format (docx, xlsx, pptx, pdf).
+    """
+    res = file_agent.convert_document(
+        source_path=req.source_path,
+        target_format=req.target_format,
+        output_dir=req.output_dir
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Conversion failed"))
+    return res
+
+
+@app.post("/api/files/extract")
+def extract_text_endpoint(req: ExtractTextRequest):
+    """Extracts readable text and tables from any document."""
+    target_p = req.file_path or req.path
+    if not target_p:
+        raise HTTPException(status_code=400, detail="file_path or path parameter is required")
+    res = file_agent.extract_document_text(target_p)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Extraction failed"))
+    return res
 
 
 @app.get("/api/browser/tabs")
@@ -958,22 +1051,35 @@ async def websocket_remote_endpoint(websocket: WebSocket):
                                             "data": {"tool": tool, "agent": agent}
                                         })
 
+                                    elif ev_type == "APPROVAL_REQUIRED":
+                                        await websocket.send_json({
+                                            "type": "approval_required",
+                                            "task_id": tid,
+                                            "approval": ev_data
+                                        })
+
+                                    elif ev_type == "APPROVAL_RESOLVED":
+                                        await websocket.send_json({
+                                            "type": "approval_resolved",
+                                            "task_id": tid,
+                                            "approval_id": ev_data.get("approval_id"),
+                                            "decision": ev_data.get("decision")
+                                        })
+
                                     elif ev_type == "TASK_COMPLETED":
                                         summary = ev_data.get("summary", "Mission completed successfully.")
                                         spoken = ev_data.get("spoken_summary", summary)
                                         spoken_clean = speech_service.filter_text_for_speech(spoken)
 
-                                        all_docs = db_list_docs(limit=5)
-                                        recent_docs = [
-                                            {
-                                                "name": d.get("filename"),
-                                                "path": d.get("file_path"),
-                                                "type": d.get("doc_type"),
-                                                "size": d.get("file_size", 0)
-                                            }
-                                            for d in all_docs
-                                            if (time.time() - (d.get("created_at") or 0)) < 180
-                                        ]
+                                        recent_docs = []
+                                        if ev_data.get("created_document"):
+                                            c_doc = ev_data["created_document"]
+                                            recent_docs.append({
+                                                "name": c_doc.get("filename"),
+                                                "path": c_doc.get("file_path"),
+                                                "type": c_doc.get("file_type"),
+                                                "size": c_doc.get("size_bytes", 0)
+                                            })
 
                                         await websocket.send_json({
                                             "type": "agent_response",
@@ -1012,6 +1118,19 @@ async def websocket_remote_endpoint(websocket: WebSocket):
                             })
 
                     asyncio.create_task(handle_remote_prompt(prompt_text))
+
+            elif evt_type in ["approval_decision", "approval_response"]:
+                appr_id = str(data.get("approval_id") or data.get("id") or "").strip()
+                decision = str(data.get("decision") or "allow_once").strip()
+                if appr_id:
+                    res = permission_engine.resolve_approval(appr_id, decision)
+                    logger.info(f"Phone Remote resolved approval {appr_id} with decision '{decision}': {res}")
+                    await websocket.send_json({
+                        "type": "approval_resolved",
+                        "approval_id": appr_id,
+                        "decision": decision,
+                        "success": res
+                    })
 
             elif evt_type == "emergency_stop":
                 orchestrator.emergency_stop()

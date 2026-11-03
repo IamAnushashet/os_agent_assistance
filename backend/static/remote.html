@@ -743,8 +743,18 @@
         <button class="chat-toggle-btn" id="chat-toggle-btn">History ▲</button>
       </div>
 
+      <!-- Mobile Attachment Chip Bar -->
+      <div id="mobile-attached-bar" style="display:none; align-items:center; justify-content:space-between; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:6px; padding:4px 8px; margin-bottom:6px; font-size:11.5px;">
+        <span id="mobile-attached-text" style="color:#38bdf8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:85%;"></span>
+        <button type="button" onclick="removeMobileAttachment()" style="background:none; border:none; color:#94a3b8; font-size:14px; cursor:pointer; padding:0 4px;" title="Remove attachment">✕</button>
+      </div>
+
       <!-- Textbox & Voice Command Bar -->
       <div class="prompt-input-row">
+        <input type="file" id="mobile-file-input" style="display:none;" onchange="handleMobileFileSelected(this)" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.csv,.md,.png,.jpg,.jpeg">
+        <button class="btn-mic" id="btn-mobile-attach" onclick="triggerMobileFileUpload()" title="Attach file to analyze or convert" style="background:#262630;">
+          📎
+        </button>
         <button class="btn-mic" id="btn-voice" onclick="toggleVoiceInput()" title="Voice input">
           🎙️
         </button>
@@ -919,6 +929,83 @@
       }).catch(e => alert("Could not reveal file: " + e.message));
     }
 
+    function appendApprovalMessage(apprId, title, tool, risk) {
+      if (!drawerMessages) return null;
+      let existing = document.getElementById(`mobile-appr-${apprId}`);
+      if (existing) return existing;
+
+      const b = document.createElement('div');
+      b.className = 'chat-bubble assistant';
+      b.id = `mobile-appr-${apprId}`;
+      b.style = "border:1px solid rgba(245, 158, 11, 0.4); background:rgba(245, 158, 11, 0.08);";
+      b.innerHTML = `
+        <div style="font-size:11px; font-weight:700; color:#fbbf24; margin-bottom:4px; display:flex; align-items:center; gap:5px;">
+          <span>⚠️</span>
+          <span>ACTION REQUIRES AUTHORIZATION</span>
+        </div>
+        <div style="font-size:12.5px; font-weight:600; color:#fff; margin-bottom:2px;">${escapeHtml(title)}</div>
+        <div style="font-size:10px; color:#94a3b8; margin-bottom:10px;">Tool: <code>${escapeHtml(tool)}</code> &bull; Risk: <span style="color:#f59e0b; font-weight:600;">${escapeHtml(risk)}</span></div>
+        <div class="mobile-appr-btn-group" style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="doc-btn" style="background:#2563eb; color:#fff; border:none; padding:7px 11px; border-radius:6px; font-weight:600;" onclick="resolveMobileApproval('${apprId}', 'allow_once')">Allow Once</button>
+          <button class="doc-btn" style="background:#334155; color:#fff; border:none; padding:7px 11px; border-radius:6px; font-weight:600;" onclick="resolveMobileApproval('${apprId}', 'allow_session')">Allow Session</button>
+          <button class="doc-btn" style="background:#ef4444; color:#fff; border:none; padding:7px 11px; border-radius:6px; font-weight:600;" onclick="resolveMobileApproval('${apprId}', 'deny')">Deny</button>
+        </div>
+      `;
+      drawerMessages.appendChild(b);
+      drawerMessages.scrollTop = drawerMessages.scrollHeight;
+      if (chatDrawer && !chatDrawer.classList.contains('open')) {
+        chatDrawer.classList.add('open');
+      }
+      return b;
+    }
+
+    async function resolveMobileApproval(apprId, decision) {
+      const card = document.getElementById(`mobile-appr-${apprId}`);
+      const isAllow = decision !== 'deny';
+      const badgeColor = isAllow ? '#10b981' : '#ef4444';
+      const badgeIcon = isAllow ? '✓' : '✕';
+      const actionText = decision === 'allow_once' ? 'Allow Once' : decision === 'allow_session' ? 'Allow for Session' : 'Deny';
+
+      if (card) {
+        const btnGroup = card.querySelector('.mobile-appr-btn-group');
+        if (btnGroup) {
+          btnGroup.innerHTML = `
+            <div style="display:flex; align-items:center; gap:6px; padding:6px 10px; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid ${badgeColor}; font-size:11px; color:${badgeColor}; font-weight:600;">
+              <span>${badgeIcon}</span>
+              <span>Submitting "${actionText}"...</span>
+            </div>
+          `;
+        }
+      }
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({
+            type: "approval_decision",
+            approval_id: apprId,
+            decision: decision
+          }));
+        } catch (e) {}
+      }
+
+      try {
+        await fetch(`${API_BASE}/api/approvals/${apprId}/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision })
+        });
+      } catch (e) {}
+
+      if (card) {
+        setTimeout(() => {
+          card.style.transition = 'all 0.3s ease-out';
+          card.style.opacity = '0';
+          card.style.transform = 'translateY(-6px)';
+          setTimeout(() => { if (card.parentNode) card.remove(); }, 300);
+        }, 400);
+      }
+    }
+
     // --- WebSocket Connection ---
     let reconnectTimer = null;
     let prevBlobUrl = null;
@@ -967,6 +1054,22 @@
               if (pinError) {
                 pinError.style.display = "block";
                 pinError.textContent = data.message || "Invalid PIN";
+              }
+            } else if (data.type === "approval_required") {
+              const appr = data.approval || {};
+              const apprId = appr.id || appr.approval_id || '';
+              const title = appr.title || appr.reason || `Execute ${appr.tool || 'Action'}`;
+              const tool = appr.tool || 'System Action';
+              const risk = appr.risk_level || 'HIGH';
+              feedbackText.innerHTML = `⚠️ <b>Action Authorization:</b> ${escapeHtml(title)}`;
+              appendApprovalMessage(apprId, title, tool, risk);
+            } else if (data.type === "approval_resolved") {
+              const aid = data.approval_id;
+              const card = document.getElementById(`mobile-appr-${aid}`);
+              if (card) {
+                card.style.transition = 'all 0.3s ease-out';
+                card.style.opacity = '0';
+                setTimeout(() => { if (card.parentNode) card.remove(); }, 300);
               }
             } else if (data.type === "agent_thinking") {
               feedbackText.innerHTML = `🤔 <b>Thinking:</b> "${escapeHtml(data.prompt)}"`;
@@ -1200,22 +1303,73 @@
       }
     }
 
+    // --- Mobile File Upload & Attachment ---
+    let mobileAttachedFile = null;
+
+    function triggerMobileFileUpload() {
+      const fi = document.getElementById('mobile-file-input');
+      if (fi) fi.click();
+    }
+
+    async function handleMobileFileSelected(input) {
+      const f = input.files[0];
+      if (!f) return;
+      feedbackText.innerHTML = `⏳ <b>Uploading:</b> "${escapeHtml(f.name)}"`;
+      try {
+        const formData = new FormData();
+        formData.append('file', f);
+        const res = await fetch('/api/files/upload', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) {
+          feedbackText.innerHTML = `❌ <b>Upload failed</b>`;
+          return;
+        }
+        const data = await res.json();
+        mobileAttachedFile = data;
+        const bar = document.getElementById('mobile-attached-bar');
+        const txt = document.getElementById('mobile-attached-text');
+        if (bar && txt) {
+          txt.innerText = `📎 ${data.filename} (${Math.round(data.size_bytes / 1024)} KB)`;
+          bar.style.display = 'flex';
+        }
+        feedbackText.innerHTML = `📎 <b>Attached:</b> "${escapeHtml(data.filename)}"`;
+      } catch (e) {
+        feedbackText.innerHTML = `❌ <b>Error:</b> ${escapeHtml(e.message)}`;
+      }
+    }
+
+    function removeMobileAttachment() {
+      mobileAttachedFile = null;
+      const bar = document.getElementById('mobile-attached-bar');
+      if (bar) bar.style.display = 'none';
+      const fi = document.getElementById('mobile-file-input');
+      if (fi) fi.value = '';
+    }
+
     // --- Action Dispatcher: Prompt / Search / Type ---
     function sendAction() {
       const text = promptInput.value.trim();
-      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if ((!text && !mobileAttachedFile) || !ws || ws.readyState !== WebSocket.OPEN) return;
       promptInput.value = '';
 
+      let payloadText = text;
+      if (mobileAttachedFile) {
+        payloadText = `[Attached file: ${mobileAttachedFile.path}]\n${text || "Convert this file or summarize its contents"}`;
+        removeMobileAttachment();
+      }
+
       if (activeMode === 'search') {
-        feedbackText.innerHTML = `🔍 <b>Searching:</b> "${escapeHtml(text)}"`;
-        ws.send(JSON.stringify({ type: "web_search", query: text }));
+        feedbackText.innerHTML = `🔍 <b>Searching:</b> "${escapeHtml(payloadText)}"`;
+        ws.send(JSON.stringify({ type: "web_search", query: payloadText }));
       } else if (activeMode === 'type') {
-        feedbackText.innerHTML = `⌨️ <b>Typing into PC:</b> "${escapeHtml(text)}"`;
-        ws.send(JSON.stringify({ type: "type_and_enter", text: text }));
+        feedbackText.innerHTML = `⌨️ <b>Typing into PC:</b> "${escapeHtml(payloadText)}"`;
+        ws.send(JSON.stringify({ type: "type_and_enter", text: payloadText }));
       } else {
         // Default: Full Multi-Agent Prompt
-        feedbackText.innerHTML = `🤔 <b>Processing:</b> "${escapeHtml(text)}"`;
-        ws.send(JSON.stringify({ type: "prompt", text: text }));
+        feedbackText.innerHTML = `🤔 <b>Processing:</b> "${escapeHtml(text || 'Attached file command')}"`;
+        ws.send(JSON.stringify({ type: "prompt", text: payloadText }));
       }
     }
 
