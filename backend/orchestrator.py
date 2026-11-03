@@ -21,13 +21,14 @@ from db import (
     save_completion_report,
     add_task_event,
     log_audit,
-    recover_stale_tasks
+    recover_stale_tasks,
+    get_db_connection
 )
 from permission_engine import permission_engine, PermissionDecision, ActionCategory, RiskLevel
 from tool_registry import tool_registry
 from semantic_planner import semantic_planner
 from speech_service import speech_service
-from config import PROJECT_ROOT
+from config import PROJECT_ROOT, settings
 
 logger = logging.getLogger("orchestrator")
 logger.setLevel(logging.INFO)
@@ -78,6 +79,10 @@ class MultiAgentOrchestrator:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         add_task_event(task_id, event_type, data)
+        try:
+            log_audit(task_id, event_type, data)
+        except Exception:
+            pass
 
         for q in list(self.event_subscribers.get(task_id, [])):
             try:
@@ -93,10 +98,19 @@ class MultiAgentOrchestrator:
                 worker.cancel()
             update_task_status(tid, TaskState.CANCELLED, error_message="Emergency Stop Triggered")
         self.active_tasks.clear()
+        try:
+            log_audit(None, "EMERGENCY_STOP_ACTIVATED", {"status": "stopped", "reason": "User emergency stop"})
+        except Exception:
+            pass
         return res
 
     def clear_emergency_stop(self) -> Dict[str, Any]:
-        return permission_engine.clear_emergency_stop()
+        res = permission_engine.clear_emergency_stop()
+        try:
+            log_audit(None, "EMERGENCY_STOP_CLEARED", {"status": "resumed"})
+        except Exception:
+            pass
+        return res
 
     async def cancel_task(self, task_id: str) -> bool:
         update_task_status(task_id, TaskState.CANCELLED, error_message="Cancelled by user")
@@ -123,7 +137,7 @@ class MultiAgentOrchestrator:
 
         ws = workspace or self.default_workspace
         task_id = f"task-{uuid.uuid4().hex[:10]}"
-        create_task(task_id, prompt, ws, permission_mode, model or "gemini-2.0-flash")
+        create_task(task_id, prompt, ws, permission_mode, model or settings.LLM_MODEL)
 
         await self.broadcast_event(task_id, "TASK_CREATED", {
             "prompt": prompt,
@@ -298,6 +312,21 @@ class MultiAgentOrchestrator:
             full_summary = " ".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
             spoken = speech_service.filter_text_for_speech(full_summary)
 
+            # If any action created a document, attach created_document directly to final_report
+            created_document = None
+            for a in executed_actions:
+                res = a.get("result", {})
+                if isinstance(res, dict) and (res.get("doc_id") or res.get("file_path") or res.get("filename")):
+                    created_document = {
+                        "doc_id": res.get("doc_id", ""),
+                        "filename": res.get("filename", ""),
+                        "file_path": str(res.get("file_path") or res.get("path") or ""),
+                        "file_type": res.get("file_type") or (res.get("filename", "").split(".")[-1].upper() if "." in res.get("filename", "") else ""),
+                        "title": res.get("title", ""),
+                        "size_bytes": res.get("file_size", 0)
+                    }
+                    break
+
             final_report = {
                 "task_id": task_id,
                 "prompt": prompt,
@@ -306,8 +335,21 @@ class MultiAgentOrchestrator:
                 "spoken_summary": spoken,
                 "agents_used": list(agents_engaged),
                 "actions_count": len(executed_actions),
-                "actions": executed_actions
+                "actions": executed_actions,
+                "created_document": created_document
             }
+
+            if created_document and (created_document.get("doc_id") or created_document.get("file_path")):
+                try:
+                    conn = get_db_connection()
+                    with conn:
+                        conn.execute(
+                            "UPDATE generated_documents SET task_id = ? WHERE id = ? OR file_path = ?",
+                            (task_id, created_document.get("doc_id", ""), created_document.get("file_path", ""))
+                        )
+                    conn.close()
+                except Exception:
+                    pass
 
             save_completion_report(task_id, final_report)
             update_task_status(task_id, TaskState.COMPLETED)

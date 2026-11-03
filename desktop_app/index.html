@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Autonomous Windows OS Assistant</title>
-  <link rel="stylesheet" href="style.css?v=3.1">
+  <link rel="stylesheet" href="style.css?v=5.2">
   <!-- Modern Font Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -99,7 +99,7 @@
       </button>
       <button class="matrix-tab" data-tab="tab-documents">
         <span class="tab-icon">📁</span>
-        <span>Document Studio (PPT & PDF)</span>
+        <span>Document Studio (PPT, Word, Excel, PDF)</span>
         <span class="tab-badge special">New</span>
       </button>
       <button class="matrix-tab" data-tab="tab-system">
@@ -110,17 +110,25 @@
         <span class="tab-icon">👁️</span>
         <span>Vision Inspector</span>
       </button>
+      <button class="matrix-tab" data-tab="tab-logs">
+        <span class="tab-icon">📜</span>
+        <span>Audit & Logs</span>
+        <span class="tab-badge" id="log-count-badge">Live</span>
+      </button>
     </nav>
 
     <!-- Body Container -->
     <div class="body-container">
       <!-- Sidebar / Mission Log -->
       <aside class="sidebar-log">
-        <div class="log-header">
-          <span class="log-title">AGENT ACTIVITY ORBIT</span>
-          <button id="btn-new-task" class="btn-mini-new">+ New Session</button>
-        </div>
+        <button id="btn-new-task" class="btn-sidebar-new" title="Start a fresh assistant mission">
+          <span style="font-size: 15px; font-weight: 700;">＋</span>
+          <span>New Mission</span>
+        </button>
 
+        <div class="sidebar-section-header">
+          <span class="log-title">ACTIVE AGENTS</span>
+        </div>
         <div class="orbit-status-card">
           <div class="agent-row" id="row-browser">
             <span class="status-pip active"></span>
@@ -144,7 +152,7 @@
           </div>
         </div>
 
-        <div class="log-header" style="margin-top: 18px;">
+        <div class="log-header" style="margin-top: 14px;">
           <span class="log-title">RECENT MISSIONS</span>
           <button id="btn-clear-tasks" class="btn-mini-clear" title="Clear all chat history">Clear All</button>
         </div>
@@ -268,7 +276,7 @@
 
               <div class="form-actions">
                 <button id="btn-exec-login" class="btn-accent-action">🚀 Submit Credentials to Browser</button>
-                <button id="btn-open-browser" class="btn-secondary-action">🌐 Focus / Open Browser</button>
+                <button id="btn-open-browser" class="btn-secondary-action">🌐 Focus / Open New Tab</button>
               </div>
               <div id="login-result-box" class="result-notice hidden"></div>
             </div>
@@ -286,23 +294,23 @@
           </div>
         </div>
 
-        <!-- 3. DOCUMENT STUDIO TAB (PPTX & PDF) -->
+        <!-- 3. DOCUMENT STUDIO TAB (PPTX, DOCX, XLSX, PDF) -->
         <div class="tab-pane" id="tab-documents">
           <div class="deck-container">
             <div class="deck-card-header">
               <div>
-                <h3>📁 Autonomous Document Studio</h3>
-                <p>Generates rich, publication-grade PowerPoint (.pptx) presentations and Executive PDF (.pdf) reports.</p>
+                <h3>📁 Autonomous Multi-Format Document Studio</h3>
+                <p>Generates genuine, publication-grade PowerPoint (.pptx), Word (.docx), Excel (.xlsx), and Executive PDF (.pdf) documents.</p>
               </div>
               <button id="btn-refresh-docs" class="btn-secondary-action">🔄 Refresh Documents</button>
             </div>
 
-            <!-- Instant Creation Deck -->
+            <!-- Instant Creation Deck (4 Formats) -->
             <div class="doc-creator-deck">
               <div class="creator-card">
                 <div class="card-tag pptx">POWERPOINT DECK (.PPTX)</div>
                 <h4>Generate Presentation</h4>
-                <p>Generates multi-slide widescreen deck with custom themes, bento cards, and key stats.</p>
+                <p>Multi-slide widescreen deck with custom themes, bento metric cards, and key insights.</p>
                 <div class="creator-input-group">
                   <input type="text" id="input-pptx-topic" placeholder="e.g. PES University Overview" value="PES University Overview">
                   <button id="btn-create-pptx" class="btn-accent-action">📊 Create PPTX</button>
@@ -310,9 +318,29 @@
               </div>
 
               <div class="creator-card">
+                <div class="card-tag docx">WORD DOCUMENT (.DOCX)</div>
+                <h4>Generate Word Document</h4>
+                <p>Publication-grade Word doc with title banner, executive callouts, and styled tables.</p>
+                <div class="creator-input-group">
+                  <input type="text" id="input-docx-topic" placeholder="e.g. AI Operating System Design" value="Enterprise AI Operating System Architecture">
+                  <button id="btn-create-docx" class="btn-accent-action blue">📝 Create DOCX</button>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-tag xlsx">EXCEL SPREADSHEET (.XLSX)</div>
+                <h4>Generate Excel Workbook</h4>
+                <p>Multi-tab workbook with styled KPI tables, auto-sum formulas, and freeze panes.</p>
+                <div class="creator-input-group">
+                  <input type="text" id="input-xlsx-topic" placeholder="e.g. Q4 Financial Model" value="Q4 Operational and Financial Model">
+                  <button id="btn-create-xlsx" class="btn-accent-action green">📈 Create XLSX</button>
+                </div>
+              </div>
+
+              <div class="creator-card">
                 <div class="card-tag pdf">EXECUTIVE REPORT (.PDF)</div>
                 <h4>Generate PDF Report</h4>
-                <p>Publication-grade PDF with executive callout box, metric tables, and running headers.</p>
+                <p>Publication-grade PDF with executive summary box, metric tables, and running headers.</p>
                 <div class="creator-input-group">
                   <input type="text" id="input-pdf-title" placeholder="e.g. Artificial Intelligence Report" value="Artificial Intelligence Comprehensive Report">
                   <button id="btn-create-pdf" class="btn-accent-action violet">📑 Create PDF</button>
@@ -409,6 +437,35 @@
                 <div id="vision-text-output" class="vision-output-text">
                   Click "Capture & Analyze Screen" to dispatch Vision Agent for UI inspection, error explanation, or on-screen target localization.
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. AUDIT & LOGS TAB -->
+        <div class="tab-pane" id="tab-logs">
+          <div class="deck-container">
+            <div class="deck-card-header">
+              <div>
+                <h3>📜 Persistent Security & Execution Audit Logs</h3>
+                <p>Complete record of all multi-agent ReAct steps, tool actions, and human governance decisions persisted in SQLite WAL (assistant.db).</p>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button id="btn-refresh-logs" class="btn-secondary-action">🔄 Refresh Logs</button>
+                <button id="btn-clear-logs" class="btn-mini-clear">🗑️ Clear Logs</button>
+              </div>
+            </div>
+
+            <div class="glass-section" style="margin-top: 15px;">
+              <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="sec-icon">🛡️</span>
+                  <span>Durable Execution & Security Audit Trail</span>
+                </div>
+                <span id="audit-log-stats" style="font-size: 11px; color: var(--text-muted);">0 entries stored</span>
+              </div>
+              <div id="logs-container" class="logs-container">
+                <div class="empty-notice" style="text-align: center; padding: 20px;">Loading audit logs...</div>
               </div>
             </div>
           </div>
@@ -516,6 +573,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=3.1"></script>
+  <script src="app.js?v=5.2"></script>
 </body>
 </html>

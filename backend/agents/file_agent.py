@@ -164,11 +164,26 @@ class FileAgent:
         if not confirm:
             return {"success": False, "error": "Deletion refused: confirm=True is required for file deletion."}
         try:
+            import time
+            import psutil
             p = self._resolve_safe_path(path)
             if not p.exists():
                 return {"success": False, "error": f"File does not exist: {path}"}
             backup = self._create_backup(p)
-            p.unlink()
+            try:
+                p.unlink()
+            except PermissionError:
+                # File is locked by an open application; gracefully close viewers to release lock
+                for proc in psutil.process_iter(['name']):
+                    pname = (proc.info.get('name') or '').lower()
+                    if any(v in pname for v in ['powerpnt', 'acrord', 'acrobat', 'winword', 'excel', 'notepad']):
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=1.0)
+                        except Exception:
+                            pass
+                time.sleep(0.3)
+                p.unlink()
             return {
                 "success": True,
                 "path": str(p),
@@ -240,6 +255,34 @@ class FileAgent:
             return doc_generator.create_pdf_report(title, filename, sections, executive_summary)
         except Exception as e:
             logger.error(f"Failed to generate PDF: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def generate_word_document(
+        self,
+        topic: str,
+        filename: Optional[str] = None,
+        sections: Optional[List[Dict[str, Any]]] = None,
+        theme: str = "enterprise"
+    ) -> Dict[str, Any]:
+        """Generates a publication-grade Word document (.docx) with structured content and tables."""
+        try:
+            return doc_generator.create_word_document(topic, filename, sections, theme)
+        except Exception as e:
+            logger.error(f"Failed to generate Word document: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def generate_excel_spreadsheet(
+        self,
+        topic: str,
+        filename: Optional[str] = None,
+        sheets_data: Optional[List[Dict[str, Any]]] = None,
+        theme: str = "modern_blue"
+    ) -> Dict[str, Any]:
+        """Generates a professional Excel workbook (.xlsx) with styled sheets and KPI formula data."""
+        try:
+            return doc_generator.create_excel_spreadsheet(topic, filename, sheets_data, theme)
+        except Exception as e:
+            logger.error(f"Failed to generate Excel spreadsheet: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
 

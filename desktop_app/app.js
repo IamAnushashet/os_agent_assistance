@@ -56,10 +56,22 @@ const loginResultBox = document.getElementById('login-result-box');
 // Document Studio DOM
 const inputPptxTopic = document.getElementById('input-pptx-topic');
 const btnCreatePptx = document.getElementById('btn-create-pptx');
+const inputDocxTopic = document.getElementById('input-docx-topic');
+const btnCreateDocx = document.getElementById('btn-create-docx');
+const inputXlsxTopic = document.getElementById('input-xlsx-topic');
+const btnCreateXlsx = document.getElementById('btn-create-xlsx');
 const inputPdfTitle = document.getElementById('input-pdf-title');
 const btnCreatePdf = document.getElementById('btn-create-pdf');
 const btnRefreshDocs = document.getElementById('btn-refresh-docs');
+const btnClearAllDocs = document.getElementById('btn-clear-all-docs');
 const docsGallery = document.getElementById('docs-gallery');
+
+// Audit & Logs DOM
+const btnRefreshLogs = document.getElementById('btn-refresh-logs');
+const btnClearLogs = document.getElementById('btn-clear-logs');
+const logsContainer = document.getElementById('logs-container');
+const logCountBadge = document.getElementById('log-count-badge');
+const auditLogStats = document.getElementById('audit-log-stats');
 
 // System Deck DOM
 const sysCpuVal = document.getElementById('sys-cpu-val');
@@ -113,6 +125,7 @@ async function init() {
   await loadRecentTasks();
   await loadDocuments();
   await loadBrowserTabs();
+  await loadAuditLogs();
 
   // Polling intervals
   telemetryTimer = setInterval(updateTelemetry, 3000);
@@ -187,6 +200,7 @@ function setupTabs() {
       if (targetId === 'tab-browser') loadBrowserTabs();
       if (targetId === 'tab-documents') loadDocuments();
       if (targetId === 'tab-vision') refreshVisionPreview();
+      if (targetId === 'tab-logs') loadAuditLogs();
     });
   });
 }
@@ -263,6 +277,11 @@ function pollTaskStatus(taskId, card) {
   pollTimer = setInterval(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/tasks/${taskId}`);
+      if (res.status === 404) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+      }
       if (!res.ok) return;
       const task = await res.json();
 
@@ -328,31 +347,90 @@ function pollTaskStatus(taskId, card) {
   }, 750);
 }
 
-function checkForCreatedDocument(card, task) {
-  const prompt = (task.user_prompt || '').toLowerCase();
-  const summary = JSON.stringify(task.completion_report || {}).toLowerCase();
+async function checkForCreatedDocument(card, task) {
+  // 1. Try to get the EXACT document created by this specific task
+  let targetDoc = null;
+  const report = task.completion_report || {};
 
-  let foundDoc = null;
-  if (prompt.includes('powerpoint') || prompt.includes('presentation') || prompt.includes('pptx') || summary.includes('.pptx')) {
-    foundDoc = { type: 'PPTX', icon: '📊', name: 'Presentation.pptx' };
-  } else if (prompt.includes('pdf') || prompt.includes('report') || summary.includes('.pdf')) {
-    foundDoc = { type: 'PDF', icon: '📑', name: 'Executive_Report.pdf' };
+  if (report.created_document && report.created_document.filename) {
+    targetDoc = report.created_document;
+  } else if (report.actions && Array.isArray(report.actions)) {
+    for (const a of report.actions) {
+      const res = a.result || {};
+      if (res.filename && (res.file_path || res.path || res.doc_id)) {
+        targetDoc = {
+          id: res.doc_id || '',
+          filename: res.filename,
+          file_path: res.file_path || res.path,
+          file_type: res.file_type || (res.filename.split('.').pop().toUpperCase())
+        };
+        break;
+      }
+    }
   }
 
-  if (foundDoc) {
-    const docCard = card.querySelector('.created-doc-card');
-    docCard.classList.remove('hidden');
-    docCard.innerHTML = `
-      <div class="doc-info">
-        <span class="doc-icon-badge">${foundDoc.icon}</span>
-        <div class="doc-text">
-          <h5>Generated ${foundDoc.type} Document Ready</h5>
-          <span>Rich multi-page content saved to project workspace</span>
-        </div>
+  // 2. Fallback: Search DB for document matching task_id or mentioned in completion summary
+  if (!targetDoc) {
+    try {
+      const res = await fetch(`${API_BASE}/api/documents`);
+      const data = await res.json();
+      if (data.documents && data.documents.length > 0) {
+        const matched = data.documents.find(d => d.task_id === task.id);
+        if (matched) {
+          targetDoc = matched;
+        } else {
+          const summaryStr = (report.summary || '').toLowerCase();
+          const foundInSummary = data.documents.find(d => d.filename && summaryStr.includes(d.filename.toLowerCase()));
+          if (foundInSummary) {
+            targetDoc = foundInSummary;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // If no document was created by this task, do not display shelf
+  if (!targetDoc) {
+    return;
+  }
+
+  const docCard = card.querySelector('.created-doc-card');
+  if (!docCard) return;
+  docCard.classList.remove('hidden');
+
+  const docName = targetDoc.filename || 'Generated Deliverable';
+  const docId = targetDoc.id || targetDoc.doc_id || '';
+  const docPath = targetDoc.file_path || targetDoc.path || '';
+  const ext = (docName.split('.').pop() || '').toLowerCase();
+
+  let icon = '📄';
+  if (ext === 'pptx' || ext === 'ppt') icon = '📊';
+  else if (ext === 'pdf') icon = '📑';
+  else if (ext === 'xlsx' || ext === 'xls') icon = '📈';
+  else if (ext === 'docx' || ext === 'doc') icon = '📝';
+
+  docCard.innerHTML = `
+    <div class="doc-info" style="display:flex; align-items:center; gap:10px; overflow:hidden; flex:1; min-width:0;">
+      <span class="doc-icon-badge" style="font-size:22px; flex-shrink:0;">${icon}</span>
+      <div class="doc-text" style="overflow:hidden; min-width:0;">
+        <h5 style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; font-weight:600; color:var(--text-main);" title="${docName}">${docName}</h5>
+        <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">Saved to generated_documents/</span>
       </div>
-      <button class="btn-open-doc" onclick="switchTabToDocuments()">📂 View in Document Studio</button>
-    `;
-  }
+    </div>
+    <div style="display:flex; gap:6px; flex-shrink:0; align-items:center;">
+      <button class="btn-shelf-action" id="card-btn-view-${task.id}" title="Open document in new browser tab">↗ Open in Tab</button>
+      <button class="btn-shelf-action" id="card-btn-open-${task.id}" title="Launch in Windows desktop application">💻 Desktop App</button>
+      <button class="btn-shelf-action" id="card-btn-reveal-${task.id}" title="Show in Windows File Explorer folder">📂 Reveal</button>
+      <button class="btn-open-doc" onclick="switchTabToDocuments()" title="View in Document Studio">🗂️ Studio</button>
+    </div>
+  `;
+
+  const bView = docCard.querySelector(`#card-btn-view-${task.id}`);
+  const bOpen = docCard.querySelector(`#card-btn-open-${task.id}`);
+  const bReveal = docCard.querySelector(`#card-btn-reveal-${task.id}`);
+  if (bView) bView.onclick = () => openDocInNewTab(docId, docPath);
+  if (bOpen) bOpen.onclick = () => openGeneratedDoc(docId, docPath);
+  if (bReveal) bReveal.onclick = () => revealGeneratedDoc(docId, docPath);
 }
 
 function renderApprovalPrompt(card, approval) {
@@ -376,8 +454,9 @@ function renderApprovalPrompt(card, approval) {
     </div>
     <div style="font-size:12.5px; color:#f8fafc; font-weight:600; margin-bottom:4px;">${title}</div>
     <div style="font-size:11px; color:#94a3b8; margin-bottom:12px;">Tool: <code style="color:#cbd5e1;">${tool}</code> &bull; Risk Level: <span style="color:#f59e0b; font-weight:600;">${risk}</span></div>
-    <div style="display:flex; gap:8px;">
-      <button class="btn-accent-action" onclick="resolveApproval('${apprId}', 'allow_once')">Allow</button>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn-accent-action" onclick="resolveApproval('${apprId}', 'allow_once')">Allow Once</button>
+      <button class="btn-secondary-action" onclick="resolveApproval('${apprId}', 'allow_session')">Allow for Session</button>
       <button class="btn-emergency" onclick="resolveApproval('${apprId}', 'deny')">Deny</button>
     </div>
   `;
@@ -506,74 +585,140 @@ async function loadDocuments() {
     const data = await res.json();
 
     if (!data.success || !data.documents || data.documents.length === 0) {
-      docsGallery.innerHTML = '<div class="empty-notice" style="grid-column:span 2;">No generated documents yet. Use the buttons above to generate your first PowerPoint presentation or PDF report.</div>';
+      docsGallery.innerHTML = '<div class="empty-notice" style="text-align:center; padding:18px;">No generated documents yet. Use the creators above to generate PowerPoint presentations or PDF reports.</div>';
       return;
     }
 
     docsGallery.innerHTML = '';
     data.documents.forEach(doc => {
-      const isPpt = (doc.file_type || doc.type || '').toUpperCase() === 'PPTX' || (doc.name || doc.filename || '').endsWith('.pptx');
-      const name = doc.filename || doc.name;
+      const ft = (doc.file_type || '').toUpperCase();
+      const fname = (doc.filename || doc.name || '').toLowerCase();
+      let icon = '📑';
+      let typeLabel = 'Executive Report (.pdf)';
+
+      if (ft === 'PPTX' || fname.endsWith('.pptx')) {
+        icon = '📊';
+        typeLabel = 'PowerPoint Presentation (.pptx)';
+      } else if (ft === 'DOCX' || fname.endsWith('.docx')) {
+        icon = '📝';
+        typeLabel = 'Word Document (.docx)';
+      } else if (ft === 'XLSX' || fname.endsWith('.xlsx')) {
+        icon = '📈';
+        typeLabel = 'Excel Spreadsheet (.xlsx)';
+      }
+
+      const name = doc.filename || doc.name || 'Untitled Document';
       const sizeKb = Math.round((doc.size_bytes || 0) / 1024);
       const docId = doc.id;
-      const docPath = doc.file_path || doc.path;
 
       const card = document.createElement('div');
       card.className = 'doc-shelf-card';
       card.id = `doc-card-${docId}`;
-      card.innerHTML = `
-        <div class="doc-shelf-left">
-          <span style="font-size:24px;">${isPpt ? '📊' : '📑'}</span>
-          <div class="doc-shelf-meta">
-            <h5 title="${name}">${name}</h5>
-            <span>${isPpt ? 'PPTX' : 'PDF'} • ${sizeKb} KB</span>
-          </div>
-        </div>
-        <div class="doc-shelf-actions">
-          <button class="btn-shelf-action" onclick="openGeneratedDoc(\`${encodeURIComponent(docPath)}\`)" title="Open in default app">
-            ▶ Open
-          </button>
-          <button class="btn-shelf-action" onclick="revealGeneratedDoc('${docId}', \`${encodeURIComponent(docPath)}\`)" title="Show in Windows File Explorer">
-            📂 Reveal
-          </button>
-          <button class="btn-shelf-del" onclick="deleteGeneratedDoc('${docId}', '${name.replace(/'/g, "\\'")}')" title="Delete file">
-            🗑️
-          </button>
+
+      const leftDiv = document.createElement('div');
+      leftDiv.className = 'doc-shelf-left';
+      leftDiv.innerHTML = `
+        <span style="font-size:24px; flex-shrink:0;">${icon}</span>
+        <div class="doc-shelf-meta">
+          <h5 title="${name}">${name}</h5>
+          <span>${typeLabel} • ${sizeKb} KB</span>
         </div>
       `;
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'doc-shelf-actions';
+
+      const docPath = doc.file_path || doc.path;
+
+      const btnView = document.createElement('button');
+      btnView.className = 'btn-shelf-action';
+      btnView.innerHTML = '↗ Open in Tab';
+      btnView.title = 'Open document in a new browser tab';
+      btnView.onclick = () => openDocInNewTab(docId, docPath);
+
+      const btnOpen = document.createElement('button');
+      btnOpen.className = 'btn-shelf-action';
+      btnOpen.innerHTML = '💻 Desktop App';
+      btnOpen.title = 'Open in default Windows desktop application';
+      btnOpen.onclick = () => openGeneratedDoc(docId, docPath);
+
+      const btnReveal = document.createElement('button');
+      btnReveal.className = 'btn-shelf-action';
+      btnReveal.innerHTML = '📂 Reveal';
+      btnReveal.title = 'Show in Windows File Explorer folder';
+      btnReveal.onclick = () => revealGeneratedDoc(docId, docPath);
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn-shelf-del';
+      btnDelete.innerHTML = '🗑️';
+      btnDelete.title = 'Delete file permanently';
+      btnDelete.onclick = () => deleteGeneratedDoc(docId, name);
+
+      actionsDiv.appendChild(btnView);
+      actionsDiv.appendChild(btnOpen);
+      actionsDiv.appendChild(btnReveal);
+      actionsDiv.appendChild(btnDelete);
+
+      card.appendChild(leftDiv);
+      card.appendChild(actionsDiv);
       docsGallery.appendChild(card);
     });
-  } catch (e) {}
+  } catch (e) {
+    docsGallery.innerHTML = '<div class="empty-notice">Could not load documents from server.</div>';
+  }
 }
 
-async function openGeneratedDoc(encodedPath) {
+function openDocInNewTab(docId, docPath) {
+  let url = `${API_BASE}/api/documents/view/${docId || ''}`;
+  if (!docId && docPath) {
+    url = `${API_BASE}/api/documents/view?path=${encodeURIComponent(docPath)}`;
+  }
+  window.open(url, '_blank');
+}
+
+async function openGeneratedDoc(docId, docPath) {
   try {
-    const path = decodeURIComponent(encodedPath);
-    await fetch(`${API_BASE}/api/documents/open`, {
+    const filename = docPath ? docPath.split(/[\\/]/).pop() : null;
+    const res = await fetch(`${API_BASE}/api/documents/open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path })
+      body: JSON.stringify({ doc_id: docId || null, path: docPath || null, filename })
     });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(`🚀 Opened in Windows: ${data.message || 'File launched'}`);
+    } else {
+      alert("Could not open file: " + (data.detail || data.error || "File not found on disk."));
+      await loadDocuments();
+    }
   } catch (e) {
     alert("Failed to open document: " + e.message);
   }
 }
 
-async function revealGeneratedDoc(docId, encodedPath) {
+async function revealGeneratedDoc(docId, docPath) {
   try {
-    const path = decodeURIComponent(encodedPath);
-    await fetch(`${API_BASE}/api/documents/reveal`, {
+    const filename = docPath ? docPath.split(/[\\/]/).pop() : null;
+    const res = await fetch(`${API_BASE}/api/documents/reveal`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc_id: docId, path })
+      body: JSON.stringify({ doc_id: docId || null, path: docPath || null, filename })
     });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const fileName = data.path ? data.path.split(/[\\/]/).pop() : 'Document';
+      showToast(`📁 Highlighted in File Explorer: ${fileName}`);
+    } else {
+      alert("Could not reveal file: " + (data.detail || data.error || "File not found."));
+      await loadDocuments();
+    }
   } catch (e) {
     alert("Failed to reveal document: " + e.message);
   }
 }
 
 async function deleteGeneratedDoc(docId, name) {
-  if (!confirm(`Delete "${name}"?\nThis removes the file from disk permanently.`)) {
+  if (!confirm(`Permanently delete "${name}" from disk?`)) {
     return;
   }
   try {
@@ -581,13 +726,34 @@ async function deleteGeneratedDoc(docId, name) {
       method: "DELETE"
     });
     const data = await res.json();
-    if (data.success) {
-      await loadDocuments();
-    } else {
-      alert("Failed to delete document: " + (data.error || "Unknown error"));
+    if (!res.ok || !data.success) {
+      alert("Could not delete file: " + (data.detail || data.error || "File is currently in use or not found."));
     }
+    await loadDocuments();
   } catch (e) {
     alert("Error deleting document: " + e.message);
+  }
+}
+
+async function clearAllDocuments() {
+  if (!confirm("Are you sure you want to delete ALL generated presentations and PDF reports? This permanently removes all files from disk.")) {
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/documents`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      alert("Could not clear all files: " + (data.detail || data.error || "Unknown error."));
+    } else {
+      if (data.locked_files && data.locked_files.length > 0) {
+        alert(`Cleared ${data.deleted_count} file(s). Note: ${data.locked_files.join(', ')} could not be deleted because they are currently open in another program.`);
+      }
+    }
+    await loadDocuments();
+  } catch (e) {
+    alert("Error clearing documents: " + e.message);
   }
 }
 
@@ -643,6 +809,126 @@ async function createPdfDirect() {
   }
 }
 
+async function createDocxDirect() {
+  const topic = (inputDocxTopic ? inputDocxTopic.value.trim() : '') || "Enterprise Architecture Report";
+  if (btnCreateDocx) {
+    btnCreateDocx.disabled = true;
+    btnCreateDocx.innerText = "Generating Word Doc...";
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/documents/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: "docx", topic: topic })
+    });
+    const data = await res.json();
+    if (data.success) {
+      await loadDocuments();
+      alert(`Word Document (.docx) created successfully!\n\nFile: ${data.filename}\nSections: ${data.sections_count || 4}\n\nYou can click 'Open' to view it in Microsoft Word.`);
+    } else {
+      alert(`Failed to create Word document: ${data.error || 'Unknown error'}`);
+    }
+  } catch (e) {
+    submitPrompt(`Create a Word document on ${topic}`);
+    document.querySelector('[data-tab="tab-console"]').click();
+  } finally {
+    if (btnCreateDocx) {
+      btnCreateDocx.disabled = false;
+      btnCreateDocx.innerText = "📝 Create DOCX";
+    }
+  }
+}
+
+async function createXlsxDirect() {
+  const topic = (inputXlsxTopic ? inputXlsxTopic.value.trim() : '') || "Q4 Financial Model";
+  if (btnCreateXlsx) {
+    btnCreateXlsx.disabled = true;
+    btnCreateXlsx.innerText = "Generating Excel...";
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/documents/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: "xlsx", topic: topic })
+    });
+    const data = await res.json();
+    if (data.success) {
+      await loadDocuments();
+      alert(`Excel Spreadsheet (.xlsx) created successfully!\n\nFile: ${data.filename}\nSheets: ${data.sheets_count || 3} tabs\n\nYou can click 'Open' to view it in Microsoft Excel.`);
+    } else {
+      alert(`Failed to create Excel spreadsheet: ${data.error || 'Unknown error'}`);
+    }
+  } catch (e) {
+    submitPrompt(`Create an Excel spreadsheet on ${topic}`);
+    document.querySelector('[data-tab="tab-console"]').click();
+  } finally {
+    if (btnCreateXlsx) {
+      btnCreateXlsx.disabled = false;
+      btnCreateXlsx.innerText = "📈 Create XLSX";
+    }
+  }
+}
+
+// =========================================================================
+// 5B. AUDIT & LOGS VIEWER
+// =========================================================================
+async function loadAuditLogs() {
+  if (!logsContainer) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/logs/audit?limit=100`);
+    const data = await res.json();
+    const logs = data.audit_logs || [];
+    if (auditLogStats) auditLogStats.innerText = `${logs.length} entries recorded`;
+    if (logCountBadge) logCountBadge.innerText = `${logs.length}`;
+
+    if (logs.length === 0) {
+      logsContainer.innerHTML = '<div class="empty-notice" style="text-align:center; padding:20px;">No audit logs recorded yet. Agent actions and security events will appear here in real time.</div>';
+      return;
+    }
+
+    logsContainer.innerHTML = '';
+    logs.forEach(l => {
+      const card = document.createElement('div');
+      card.className = 'log-card';
+      const ev = (l.event_name || 'EVENT').toLowerCase();
+      let tagClass = 'task_created';
+      if (ev.includes('completed')) tagClass = 'action_completed';
+      else if (ev.includes('failed')) tagClass = 'action_failed';
+      else if (ev.includes('executing')) tagClass = 'action_executing';
+      else if (ev.includes('approval')) tagClass = 'approval_required';
+      else if (ev.includes('stop')) tagClass = 'emergency_stop';
+
+      const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '';
+      const detailsJson = JSON.stringify(l.details || {}, null, 2);
+
+      card.innerHTML = `
+        <div class="log-card-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="log-event-tag ${tagClass}">${l.event_name || 'LOG'}</span>
+            <span style="font-size:11px; font-weight:600; color:#f1f5f9;">${l.task_id ? 'Task: ' + l.task_id : 'System Event'}</span>
+          </div>
+          <span class="log-time">${timeStr}</span>
+        </div>
+        <pre class="log-details-pre">${escapeHtml(detailsJson)}</pre>
+      `;
+      logsContainer.appendChild(card);
+    });
+  } catch (e) {
+    logsContainer.innerHTML = '<div class="empty-notice">Could not load audit logs.</div>';
+  }
+}
+
+async function clearAuditLogs() {
+  if (!confirm("Wipe all persistent security & execution logs from SQLite?")) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/logs/audit`, { method: "DELETE" });
+    const data = await res.json();
+    await loadAuditLogs();
+  } catch (e) {
+    alert("Failed to clear logs: " + e.message);
+  }
+}
+
 // =========================================================================
 // 6. VISION INSPECTOR
 // =========================================================================
@@ -680,6 +966,40 @@ function refreshVisionPreview() {
   }
 }
 
+function showToast(message, type = 'info') {
+  let toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'toast-container';
+    toastContainer.style = "position:fixed; bottom:24px; right:24px; z-index:99999; display:flex; flex-direction:column; gap:8px; pointer-events:none;";
+    document.body.appendChild(toastContainer);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast-bubble';
+  toast.style = "background:#1e293b; color:#f8fafc; border:1px solid #38bdf8; padding:10px 16px; border-radius:8px; font-size:12.5px; font-weight:500; box-shadow:0 8px 24px rgba(0,0,0,0.5); opacity:0; transform:translateY(10px); transition:all 0.25s cubic-bezier(0.16,1,0.3,1); pointer-events:auto;";
+  toast.innerText = message;
+  toastContainer.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  }, 10);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(10px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+function appendSystemEventCard(message, type = 'info') {
+  const card = document.createElement('div');
+  card.className = 'task-card system-event-card';
+  const color = type === 'danger' ? '#ef4444' : type === 'success' ? '#10b981' : '#38bdf8';
+  card.style = `border-left: 3px solid ${color}; background: rgba(15, 23, 42, 0.6); padding: 12px 16px; margin: 8px 0; border-radius: 8px; font-size: 13px; font-weight: 600; color: #f8fafc;`;
+  card.innerHTML = `<div>${message}</div>`;
+  messageThread.appendChild(card);
+  chatViewport.scrollTop = chatViewport.scrollHeight;
+}
+
 // =========================================================================
 // 7. EMERGENCY STOP & EVENT LISTENERS
 // =========================================================================
@@ -700,9 +1020,13 @@ async function toggleEmergencyStop() {
   if (isEmergencyStopped) {
     await fetch(`${API_BASE}/api/emergency-stop/clear`, { method: "POST" });
     setEmergencyStoppedUI(false);
+    appendSystemEventCard("🟩 Emergency Stop cleared. Agent operations resumed.", "success");
+    showToast("Agent operations resumed");
   } else {
     await fetch(`${API_BASE}/api/emergency-stop`, { method: "POST" });
     setEmergencyStoppedUI(true);
+    appendSystemEventCard("🔴 EMERGENCY STOP ACTIVATED: All agent actions halted. Approvals cancelled.", "danger");
+    showToast("EMERGENCY STOP ACTIVATED", "danger");
   }
 }
 
@@ -713,7 +1037,7 @@ async function loadRecentTasks() {
     historyList.innerHTML = '';
     
     if (!data.tasks || data.tasks.length === 0) {
-      historyList.innerHTML = '<div style="font-size:10px; color:var(--text-muted); padding:8px 4px; text-align:center;">No past missions yet.</div>';
+      historyList.innerHTML = '<div style="font-size:11px; color:var(--text-muted); padding:10px 4px; text-align:center;">No past missions yet.</div>';
       return;
     }
 
@@ -722,16 +1046,31 @@ async function loadRecentTasks() {
       item.className = `history-item ${activeTaskId === t.id ? 'active' : ''}`;
       item.id = `history-item-${t.id}`;
 
+      // Smart icon selection based on task prompt
+      const promptLower = (t.user_prompt || '').toLowerCase();
+      let icon = '💬';
+      if (promptLower.includes('ppt') || promptLower.includes('powerpoint') || promptLower.includes('slide')) {
+        icon = '📊';
+      } else if (promptLower.includes('pdf') || promptLower.includes('report') || promptLower.includes('word') || promptLower.includes('doc')) {
+        icon = '📄';
+      } else if (promptLower.includes('excel') || promptLower.includes('sheet') || promptLower.includes('csv')) {
+        icon = '📈';
+      } else if (promptLower.includes('browser') || promptLower.includes('chrome') || promptLower.includes('edge') || promptLower.includes('web') || promptLower.includes('search')) {
+        icon = '🌐';
+      } else if (promptLower.includes('screen') || promptLower.includes('look') || promptLower.includes('see') || promptLower.includes('ocr')) {
+        icon = '👁️';
+      } else if (promptLower.includes('system') || promptLower.includes('process') || promptLower.includes('ram') || promptLower.includes('cpu')) {
+        icon = '⚙️';
+      }
+
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'history-item-icon';
+      iconSpan.innerText = icon;
+
       const titleSpan = document.createElement('span');
       titleSpan.className = 'history-item-title';
       titleSpan.innerText = t.user_prompt;
       titleSpan.title = t.user_prompt;
-      titleSpan.onclick = () => {
-        activeTaskId = t.id;
-        document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
-        renderPastTask(t);
-      };
 
       const delBtn = document.createElement('button');
       delBtn.className = 'history-item-del';
@@ -742,6 +1081,14 @@ async function loadRecentTasks() {
         deleteSingleTask(t.id);
       };
 
+      item.onclick = () => {
+        activeTaskId = t.id;
+        document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        renderPastTask(t);
+      };
+
+      item.appendChild(iconSpan);
       item.appendChild(titleSpan);
       item.appendChild(delBtn);
       historyList.appendChild(item);
@@ -843,14 +1190,31 @@ function setupEventListeners() {
   // Browser Agent
   btnRefreshTabs.addEventListener('click', loadBrowserTabs);
   btnExecLogin.addEventListener('click', executeBrowserLogin);
-  btnOpenBrowser.addEventListener('click', () => {
-    submitPrompt("Open my existing browser window");
+  btnOpenBrowser.addEventListener('click', async () => {
+    btnOpenBrowser.disabled = true;
+    btnOpenBrowser.innerText = "Opening Tab...";
+    try {
+      await fetch(`${API_BASE}/api/browser/open`, { method: "POST" });
+      await loadBrowserTabs();
+    } catch (e) {
+      submitPrompt("Open my existing browser in a new tab");
+    } finally {
+      btnOpenBrowser.disabled = false;
+      btnOpenBrowser.innerText = "🌐 Focus / Open New Tab";
+    }
   });
 
   // Document Studio
-  btnCreatePptx.addEventListener('click', createPptxDirect);
-  btnCreatePdf.addEventListener('click', createPdfDirect);
-  btnRefreshDocs.addEventListener('click', loadDocuments);
+  if (btnCreatePptx) btnCreatePptx.addEventListener('click', createPptxDirect);
+  if (btnCreateDocx) btnCreateDocx.addEventListener('click', createDocxDirect);
+  if (btnCreateXlsx) btnCreateXlsx.addEventListener('click', createXlsxDirect);
+  if (btnCreatePdf) btnCreatePdf.addEventListener('click', createPdfDirect);
+  if (btnRefreshDocs) btnRefreshDocs.addEventListener('click', loadDocuments);
+  if (btnClearAllDocs) btnClearAllDocs.addEventListener('click', clearAllDocuments);
+
+  // Audit Logs
+  if (btnRefreshLogs) btnRefreshLogs.addEventListener('click', loadAuditLogs);
+  if (btnClearLogs) btnClearLogs.addEventListener('click', clearAuditLogs);
 
   // Vision
   btnCaptureVision.addEventListener('click', captureAndAnalyzeVision);

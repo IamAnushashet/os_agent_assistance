@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import settings, update_env, PROJECT_ROOT, OUTPUT_DOCS_DIR
 from db import (
-    init_db, list_tasks, get_task, get_task_events, get_recent_audit_logs,
+    init_db, list_tasks, get_task, get_task_events, get_recent_audit_logs, clear_audit_logs,
     delete_task, clear_all_tasks, update_task_title,
     list_generated_documents as db_list_docs, get_generated_document as db_get_doc,
     delete_generated_document as db_delete_doc, save_generated_document as db_save_doc,
@@ -36,6 +36,7 @@ from llm_gateway import llm_gateway
 from agents.browser_agent import browser_agent
 from agents.file_agent import file_agent
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("main")
 logger.setLevel(logging.INFO)
 
@@ -132,12 +133,15 @@ def get_network_info():
     ip = get_local_ip()
     port = settings.PORT
     remote_url = f"http://{ip}:{port}/remote?token={settings.REMOTE_AUTH_TOKEN}"
+    dims = get_screen_dimensions()
     return {
         "ip": ip,
         "port": port,
         "remote_url": remote_url,
         "pairing_pin": settings.REMOTE_PAIRING_PIN,
-        "token": settings.REMOTE_AUTH_TOKEN
+        "token": settings.REMOTE_AUTH_TOKEN,
+        "screen_width": dims[0],
+        "screen_height": dims[1]
     }
 
 
@@ -173,7 +177,11 @@ def list_generated_documents():
     Combines SQLite registry with physical folder reconciliation.
     Strictly ignores temporary/lock files (e.g. ~$*.pptx).
     """
-    # 1. Auto-register any real physical files in OUTPUT_DOCS_DIR not yet recorded
+    # 1. Check existing DB records first to prevent resetting timestamps
+    existing_docs = db_list_docs(limit=100)
+    existing_paths = {d["file_path"] for d in existing_docs}
+
+    # 2. Auto-register only unrecorded physical files in OUTPUT_DOCS_DIR
     if OUTPUT_DOCS_DIR.exists():
         for f in OUTPUT_DOCS_DIR.glob("*"):
             if not f.is_file():
@@ -181,12 +189,13 @@ def list_generated_documents():
             # Skip hidden, temporary, or Office lock files
             if f.name.startswith("~$") or f.name.startswith(".") or f.name.startswith("~"):
                 continue
-            if f.suffix.lower() in [".pptx", ".pdf", ".docx", ".txt"]:
+            fpath_str = str(f.resolve())
+            if fpath_str not in existing_paths and f.suffix.lower() in [".pptx", ".pdf", ".docx", ".xlsx", ".txt"]:
                 try:
                     db_save_doc(
-                        doc_id=f"doc-{f.stem[:12]}-{hex(abs(hash(str(f.resolve()))))[2:8]}",
+                        doc_id=f"doc-{f.stem[:12]}-{hex(abs(hash(fpath_str)))[2:8]}",
                         filename=f.name,
-                        file_path=str(f.resolve()),
+                        file_path=fpath_str,
                         file_type=f.suffix.lower().replace(".", "").upper(),
                         topic=f.stem.replace("_", " "),
                         size_bytes=f.stat().st_size
@@ -194,13 +203,19 @@ def list_generated_documents():
                 except Exception:
                     pass
 
-    # 2. Query DB and clean out any stale/missing records
+    # 3. Query DB and clean out any stale/missing records or test temp files
     docs = db_list_docs(limit=50)
     valid_docs = []
+    proj_resolved = PROJECT_ROOT.resolve()
     for d in docs:
-        p = Path(d["file_path"])
-        # If file is a temp lock file or doesn't exist on disk, purge from DB
-        if p.name.startswith("~$") or p.name.startswith("~") or not p.exists():
+        try:
+            p = Path(d["file_path"]).resolve()
+            is_in_project = p.is_relative_to(proj_resolved)
+        except Exception:
+            is_in_project = False
+
+        # Purge temporary lock files, pytest temp files outside project, or non-existent files
+        if not is_in_project or p.name.startswith("~$") or p.name.startswith("~") or not p.exists():
             db_delete_doc(d["id"])
         else:
             d["exists"] = True
@@ -209,29 +224,91 @@ def list_generated_documents():
     return {"success": True, "documents": valid_docs}
 
 
+@app.get("/api/documents/view/{doc_id}")
+@app.get("/api/documents/view")
+def view_document_in_tab(doc_id: Optional[str] = None, path: Optional[str] = None):
+    """Serves the document file directly for viewing in a new browser tab with inline disposition."""
+    path_str = path
+    if doc_id:
+        doc = db_get_doc(doc_id)
+        if doc and doc.get("file_path"):
+            path_str = doc["file_path"]
+
+    if not path_str and doc_id:
+        for f in OUTPUT_DOCS_DIR.glob("*"):
+            if doc_id in f.name or f.stem in doc_id:
+                path_str = str(f.resolve())
+                break
+
+    if not path_str or not Path(path_str).exists():
+        raise HTTPException(status_code=404, detail="Document file not found on disk.")
+
+    p = Path(path_str).resolve()
+    media_types = {
+        ".pdf": "application/pdf",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".txt": "text/plain; charset=utf-8",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg"
+    }
+    media_type = media_types.get(p.suffix.lower(), "application/octet-stream")
+
+    return FileResponse(
+        str(p),
+        media_type=media_type,
+        filename=p.name,
+        content_disposition_type="inline"
+    )
+
+
 @app.post("/api/documents/open")
 def open_document(req: Dict[str, str]):
-    """Opens a document in its default Windows desktop application."""
+    """Opens a document in its default Windows desktop application using native ShellExecute / os.startfile."""
     path_str = req.get("path")
     doc_id = req.get("doc_id")
     if doc_id:
         doc = db_get_doc(doc_id)
-        if doc:
+        if doc and doc.get("file_path"):
             path_str = doc["file_path"]
+
+    # Fallback: search in OUTPUT_DOCS_DIR if path was lost
+    if not path_str and doc_id:
+        for f in OUTPUT_DOCS_DIR.glob("*"):
+            if doc_id in f.name or f.stem in doc_id:
+                path_str = str(f.resolve())
+                break
+
+    if not path_str and req.get("filename"):
+        for f in OUTPUT_DOCS_DIR.glob("*"):
+            if f.name == req["filename"]:
+                path_str = str(f.resolve())
+                break
 
     if not path_str:
         raise HTTPException(status_code=400, detail="Missing path or doc_id")
+
     p = Path(path_str).resolve()
     if not p.exists():
         if doc_id:
             db_delete_doc(doc_id)
         raise HTTPException(status_code=404, detail=f"File not found on disk: {p.name}")
+
     try:
         os.startfile(str(p))
         return {"success": True, "message": f"Opened '{p.name}' in default Windows application."}
     except Exception as e:
-        logger.error(f"Error opening document {p}: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not open '{p.name}': {str(e)}")
+        try:
+            import ctypes
+            ret = ctypes.windll.shell32.ShellExecuteW(None, "open", str(p), None, None, 1)
+            if ret > 32:
+                return {"success": True, "message": f"Opened '{p.name}' in default Windows application."}
+            raise RuntimeError(f"ShellExecute error code: {ret}")
+        except Exception as e2:
+            logger.error(f"Error opening document {p}: {e2}")
+            raise HTTPException(status_code=500, detail=f"Could not open '{p.name}': {str(e2)}")
 
 
 @app.post("/api/documents/reveal")
@@ -241,24 +318,59 @@ def reveal_document_in_explorer(req: Dict[str, str]):
     doc_id = req.get("doc_id")
     if doc_id:
         doc = db_get_doc(doc_id)
-        if doc:
+        if doc and doc.get("file_path"):
             path_str = doc["file_path"]
 
+    # Fallback: search in OUTPUT_DOCS_DIR if path was lost
+    if not path_str and doc_id:
+        for f in OUTPUT_DOCS_DIR.glob("*"):
+            if doc_id in f.name or f.stem in doc_id:
+                path_str = str(f.resolve())
+                break
+
+    if not path_str and req.get("filename"):
+        for f in OUTPUT_DOCS_DIR.glob("*"):
+            if f.name == req["filename"]:
+                path_str = str(f.resolve())
+                break
+
     if not path_str:
-        raise HTTPException(status_code=400, detail="Missing path or doc_id")
+        path_str = str(OUTPUT_DOCS_DIR.resolve())
+
     p = Path(path_str).resolve()
     if not p.exists():
-        if doc_id:
-            db_delete_doc(doc_id)
-        raise HTTPException(status_code=404, detail=f"File not found on disk: {p.name}")
+        candidate = OUTPUT_DOCS_DIR / p.name
+        if candidate.exists():
+            p = candidate.resolve()
+        elif OUTPUT_DOCS_DIR.exists():
+            p = OUTPUT_DOCS_DIR.resolve()
+        else:
+            raise HTTPException(status_code=404, detail=f"File not found on disk: {p.name}")
 
     try:
-        # Standard native Windows call to select file in Explorer
-        subprocess.Popen(["explorer.exe", f"/select,{str(p)}"])
-        return {"success": True, "message": f"Revealed '{p.name}' in Windows File Explorer."}
+        if p.is_file():
+            # In Windows, explorer.exe requires /select,"<path>" where /select, is strictly OUTSIDE the quotes.
+            # Passing a list to subprocess.Popen triggers list2cmdline which wraps the entire switch in quotes if the path has spaces.
+            # Therefore, we pass a single formatted command string.
+            clean_path = str(p.resolve())
+            cmd = f'explorer.exe /select,"{clean_path}"'
+            logger.info(f"Revealing file in Explorer with command: {cmd}")
+            subprocess.Popen(cmd, shell=False)
+            return {"success": True, "path": clean_path, "message": f"Revealed '{p.name}' in Windows File Explorer."}
+        else:
+            clean_path = str(p.resolve())
+            cmd = f'explorer.exe "{clean_path}"'
+            logger.info(f"Opening folder in Explorer with command: {cmd}")
+            subprocess.Popen(cmd, shell=False)
+            return {"success": True, "path": clean_path, "message": f"Opened folder '{p.name}' in Windows File Explorer."}
     except Exception as e:
         logger.error(f"Error revealing document {p}: {e}")
-        return {"success": False, "error": str(e)}
+        try:
+            target_dir = str(p.parent if p.is_file() else p)
+            os.startfile(target_dir)
+            return {"success": True, "path": target_dir, "message": f"Opened folder containing '{p.name}'."}
+        except Exception as e2:
+            return {"success": False, "error": str(e2)}
 
 
 @app.delete("/api/documents/{doc_id}")
@@ -285,12 +397,36 @@ def delete_document_endpoint(doc_id: str):
             p.unlink()
             deleted_from_disk = True
         except PermissionError:
-            raise HTTPException(
-                status_code=409,
-                detail=f"File '{p.name}' is currently open in PowerPoint or another viewer. Please close it first."
-            )
+            # File is locked by PowerPoint, PDF viewer, Word, or Excel.
+            # Gracefully terminate viewers to release Windows file handle lock.
+            for proc in psutil.process_iter(['name']):
+                pname = (proc.info.get('name') or '').lower()
+                if any(v in pname for v in ['powerpnt', 'acrord', 'acrobat', 'winword', 'excel', 'notepad']):
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=1.5)
+                    except Exception:
+                        pass
+            import time
+            time.sleep(0.3)
+            try:
+                p.unlink()
+                deleted_from_disk = True
+            except Exception as e:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"File '{p.name}' is currently locked by another application. Please close the viewer and retry."
+                )
         except Exception as e:
             logger.warning(f"Could not delete physical file {p}: {e}")
+
+    # Also clean up any associated temporary lock file
+    temp_lock = p.parent / f"~${p.name}"
+    if temp_lock.exists():
+        try:
+            temp_lock.unlink()
+        except Exception:
+            pass
 
     # Remove from SQLite database
     db_delete_doc(doc_id)
@@ -309,6 +445,19 @@ def clear_all_documents_endpoint():
     paths = db_clear_all_docs()
     deleted_count = 0
     locked_files = []
+
+    # Close any open viewers to release locks
+    for proc in psutil.process_iter(['name']):
+        pname = (proc.info.get('name') or '').lower()
+        if any(v in pname for v in ['powerpnt', 'acrord', 'acrobat', 'winword', 'excel', 'notepad']):
+            try:
+                proc.terminate()
+                proc.wait(timeout=1.5)
+            except Exception:
+                pass
+
+    import time
+    time.sleep(0.3)
 
     # Clean disk files in OUTPUT_DOCS_DIR
     if OUTPUT_DOCS_DIR.exists():
@@ -329,7 +478,7 @@ def clear_all_documents_endpoint():
 
 
 class GenerateDocRequest(BaseModel):
-    doc_type: str  # "pptx" or "pdf"
+    doc_type: str  # "pptx", "pdf", "docx", or "xlsx"
     topic: str
     filename: Optional[str] = None
 
@@ -339,6 +488,10 @@ def generate_document_endpoint(req: GenerateDocRequest):
     dtype = req.doc_type.lower()
     if dtype in ["pptx", "presentation", "powerpoint", "ppt"]:
         return file_agent.generate_presentation(topic=req.topic, filename=req.filename)
+    elif dtype in ["docx", "word", "doc"]:
+        return file_agent.generate_word_document(topic=req.topic, filename=req.filename)
+    elif dtype in ["xlsx", "excel", "sheet", "spreadsheet", "xls"]:
+        return file_agent.generate_excel_spreadsheet(topic=req.topic, filename=req.filename)
     else:
         return file_agent.generate_pdf(title=req.topic, filename=req.filename)
 
@@ -349,6 +502,16 @@ def get_browser_tabs():
     return browser_agent.get_open_tabs()
 
 
+class BrowserOpenRequest(BaseModel):
+    url: Optional[str] = None
+
+@app.post("/api/browser/open")
+async def open_browser_tab_endpoint(req: Optional[BrowserOpenRequest] = None):
+    """Brings running browser to foreground and always opens in a fresh new tab."""
+    target_url = req.url if req else None
+    return await browser_agent.new_tab(url=target_url)
+
+
 class BrowserLoginRequest(BaseModel):
     url: Optional[str] = None
     username: Optional[str] = None
@@ -357,7 +520,7 @@ class BrowserLoginRequest(BaseModel):
 
 @app.post("/api/browser/login")
 async def browser_login_endpoint(req: BrowserLoginRequest):
-    """Executes browser login assistance."""
+    """Executes browser login assistance in a fresh new tab."""
     res = await browser_agent.login(
         url=req.url,
         username=req.username,
@@ -452,9 +615,57 @@ def get_task_events_endpoint(task_id: str):
 
 
 @app.get("/api/logs/audit")
-def get_audit_logs_endpoint(limit: int = 50):
-    """Returns persistent security audit logs."""
+def get_audit_logs_endpoint(limit: int = 100):
+    """Returns persistent security and execution audit logs."""
     return {"audit_logs": get_recent_audit_logs(limit=limit)}
+
+
+@app.delete("/api/logs/audit")
+def clear_audit_logs_endpoint():
+    """Wipes all security audit logs from the database."""
+    count = clear_audit_logs()
+    return {"success": True, "count": count, "message": f"Cleared {count} audit log(s)."}
+
+
+# ----------------- DIRECT FILE CRUD OPERATIONS -----------------
+
+class FileReadRequest(BaseModel):
+    path: str
+    max_bytes: Optional[int] = 50_000
+
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+    overwrite: Optional[bool] = True
+
+class FileEditRequest(BaseModel):
+    path: str
+    find: str
+    replace: str
+
+class FileDeleteRequest(BaseModel):
+    path: str
+    confirm: Optional[bool] = True
+
+@app.post("/api/files/read")
+def read_file_endpoint(req: FileReadRequest):
+    """Safely reads file content subject to canonical root isolation."""
+    return file_agent.read_file(path=req.path, max_bytes=req.max_bytes or 50_000)
+
+@app.post("/api/files/write")
+def write_file_endpoint(req: FileWriteRequest):
+    """Writes content to disk with automatic rollback backup in scratch/.file_backups/."""
+    return file_agent.write_file(path=req.path, content=req.content, overwrite=req.overwrite if req.overwrite is not None else True)
+
+@app.post("/api/files/edit")
+def edit_file_endpoint(req: FileEditRequest):
+    """Performs localized find-and-replace, creating a backup and returning unified diff."""
+    return file_agent.edit_file(path=req.path, find=req.find, replace=req.replace)
+
+@app.delete("/api/files")
+def delete_file_endpoint(req: FileDeleteRequest):
+    """Safely deletes a file with automatic backup in scratch/.file_backups/ and viewer unlock."""
+    return file_agent.delete_file(path=req.path, confirm=req.confirm if req.confirm is not None else True)
 
 
 # ----------------- APPROVALS & EMERGENCY STOP -----------------
@@ -530,16 +741,34 @@ def update_settings_endpoint(req: SettingsUpdateRequest):
 def get_remote_page():
     remote_html_path = STATIC_DIR / "remote.html"
     if remote_html_path.exists():
-        return remote_html_path.read_text(encoding="utf-8")
+        content = remote_html_path.read_text(encoding="utf-8")
+        res = HTMLResponse(content=content)
+        res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        res.headers["Pragma"] = "no-cache"
+        res.headers["Expires"] = "0"
+        return res
     return "<h3>Mobile Remote interface not found.</h3>"
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 def get_desktop_page():
-    index_path = DESKTOP_DIR / "index.html"
-    if index_path.exists():
-        return index_path.read_text(encoding="utf-8")
-    return "<h3>Desktop interface loading...</h3>"
+    return RedirectResponse(url="/desktop/index.html")
+
+
+@app.get("/style.css")
+def get_root_style():
+    css_file = DESKTOP_DIR / "style.css"
+    if css_file.exists():
+        return FileResponse(css_file, media_type="text/css", headers={"Cache-Control": "no-cache, must-revalidate"})
+    return Response(status_code=404)
+
+
+@app.get("/app.js")
+def get_root_app_js():
+    js_file = DESKTOP_DIR / "app.js"
+    if js_file.exists():
+        return FileResponse(js_file, media_type="application/javascript", headers={"Cache-Control": "no-cache, must-revalidate"})
+    return Response(status_code=404)
 
 
 @app.websocket("/ws/remote")
@@ -609,26 +838,39 @@ async def websocket_remote_endpoint(websocket: WebSocket):
             logger.info(f"Phone Remote control event: {evt_type}")
 
             if evt_type == "trackpad_move":
-                dx = data.get("dx", 0)
-                dy = data.get("dy", 0)
+                dx = float(data.get("dx", 0))
+                dy = float(data.get("dy", 0))
                 controller.move_relative(dx, dy)
 
-            elif evt_type == "trackpad_click":
+            elif evt_type == "mouse_click_coords":
+                x = data.get("x")
+                y = data.get("y")
                 btn = data.get("button", "left")
-                controller.click(button=btn)
+                if x is not None and y is not None:
+                    controller.click(x=int(x), y=int(y), button=btn)
+                    logger.info(f"Direct screen mirror click: ({x}, {y}) [{btn}]")
+                    await websocket.send_json({"type": "ACTION_FEEDBACK", "message": f"Clicked ({x}, {y})"})
 
-            elif evt_type == "trackpad_scroll":
-                amount = data.get("amount", 0)
+            elif evt_type in ["trackpad_click", "click"]:
+                btn = data.get("button", "left")
+                clicks = int(data.get("clicks", 1))
+                controller.click(button=btn, clicks=clicks)
+
+            elif evt_type in ["trackpad_scroll", "scroll"]:
+                amount = float(data.get("dy") or data.get("amount", 0))
                 controller.scroll(amount)
 
-            elif evt_type == "trackpad_mouse_down":
+            elif evt_type in ["trackpad_mouse_down", "mouse_down"]:
                 controller.mouse_down(data.get("button", "left"))
 
-            elif evt_type == "trackpad_mouse_up":
+            elif evt_type in ["trackpad_mouse_up", "mouse_up"]:
                 controller.mouse_up(data.get("button", "left"))
 
-            elif evt_type == "type_text":
-                controller.type_text(data.get("text", ""))
+            elif evt_type in ["type_text", "type"]:
+                txt = data.get("text", "")
+                if txt:
+                    controller.type_text(txt)
+                    await websocket.send_json({"type": "ACTION_FEEDBACK", "message": f"Typed: {txt[:25]}"})
 
             elif evt_type == "type_and_enter":
                 txt = data.get("text", "")
@@ -676,23 +918,108 @@ async def websocket_remote_endpoint(websocket: WebSocket):
                     controller.scroll(3.0)
                 await websocket.send_json({"type": "BROWSER_ACTION_DONE", "action": action})
 
-            elif evt_type == "press_key":
-                controller.press_key(data.get("key", ""))
+            elif evt_type in ["press_key", "press"]:
+                controller.press_key(data.get("key", "enter"))
 
             elif evt_type == "hotkey":
                 keys = data.get("keys", [])
                 if keys:
                     controller.hotkey(*keys)
 
-            elif evt_type == "user_prompt":
-                prompt = data.get("prompt", "")
-                if prompt:
-                    tid = await orchestrator.create_and_run_task(prompt=prompt)
-                    await websocket.send_json({"type": "TASK_DISPATCHED", "task_id": tid})
+            elif evt_type in ["prompt", "user_prompt"]:
+                prompt_text = (data.get("text") or data.get("prompt") or "").strip()
+                if prompt_text:
+                    logger.info(f"Phone Remote dispatching agent prompt: '{prompt_text}'")
+                    # Send immediate thinking event to phone
+                    await websocket.send_json({
+                        "type": "agent_thinking",
+                        "prompt": prompt_text
+                    })
+
+                    async def handle_remote_prompt(p_txt: str):
+                        try:
+                            tid = await orchestrator.create_and_run_task(
+                                prompt=p_txt,
+                                permission_mode="balanced"
+                            )
+                            q = orchestrator.subscribe(tid)
+                            try:
+                                while True:
+                                    event = await asyncio.wait_for(q.get(), timeout=50.0)
+                                    ev_type = event.get("event_type")
+                                    ev_data = event.get("data", {})
+
+                                    if ev_type == "ACTION_EXECUTING":
+                                        tool = ev_data.get("tool", "")
+                                        agent = ev_data.get("agent", "")
+                                        await websocket.send_json({
+                                            "type": "agent_progress",
+                                            "event_type": "ACTION_EXECUTING",
+                                            "data": {"tool": tool, "agent": agent}
+                                        })
+
+                                    elif ev_type == "TASK_COMPLETED":
+                                        summary = ev_data.get("summary", "Mission completed successfully.")
+                                        spoken = ev_data.get("spoken_summary", summary)
+                                        spoken_clean = speech_service.filter_text_for_speech(spoken)
+
+                                        all_docs = db_list_docs(limit=5)
+                                        recent_docs = [
+                                            {
+                                                "name": d.get("filename"),
+                                                "path": d.get("file_path"),
+                                                "type": d.get("doc_type"),
+                                                "size": d.get("file_size", 0)
+                                            }
+                                            for d in all_docs
+                                            if (time.time() - (d.get("created_at") or 0)) < 180
+                                        ]
+
+                                        await websocket.send_json({
+                                            "type": "agent_response",
+                                            "role": "assistant",
+                                            "task_id": tid,
+                                            "content": summary,
+                                            "spoken_summary": spoken_clean,
+                                            "audio_url": "/api/speech/tts",
+                                            "documents": recent_docs
+                                        })
+                                        break
+
+                                    elif ev_type in ["TASK_FAILED", "TASK_CANCELLED"]:
+                                        err_reason = ev_data.get("reason") or ev_data.get("error") or "Mission cancelled."
+                                        await websocket.send_json({
+                                            "type": "task_failed",
+                                            "task_id": tid,
+                                            "error": err_reason
+                                        })
+                                        break
+                            except asyncio.TimeoutError:
+                                await websocket.send_json({
+                                    "type": "agent_response",
+                                    "role": "assistant",
+                                    "task_id": tid,
+                                    "content": "Task is actively running in background on your Windows desktop.",
+                                    "spoken_summary": "Task running in background."
+                                })
+                            finally:
+                                orchestrator.unsubscribe(tid, q)
+                        except Exception as ex:
+                            logger.error(f"Remote prompt execution error: {ex}")
+                            await websocket.send_json({
+                                "type": "task_failed",
+                                "error": str(ex)
+                            })
+
+                    asyncio.create_task(handle_remote_prompt(prompt_text))
 
             elif evt_type == "emergency_stop":
                 orchestrator.emergency_stop()
-                await websocket.send_json({"type": "EMERGENCY_STOPPED"})
+                await websocket.send_json({"type": "emergency_stop_triggered", "message": "Emergency Stop Triggered"})
+
+            elif evt_type == "clear_emergency_stop":
+                orchestrator.clear_emergency_stop()
+                await websocket.send_json({"type": "emergency_stop_cleared", "message": "Emergency Stop Cleared"})
 
     except WebSocketDisconnect:
         logger.info("Mobile Remote disconnected.")

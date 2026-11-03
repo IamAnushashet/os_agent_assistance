@@ -98,13 +98,36 @@ def test_documents_crud_endpoints(tmp_path):
     found = next((d for d in docs if "PES_Robotics_Deck.pptx" in d["filename"]), None)
     assert found is not None
 
-    # 3. Delete document
+    # 3. View document in new tab & Reveal document
     doc_id = found["id"]
+    res_view = client.get(f"/api/documents/view/{doc_id}")
+    assert res_view.status_code == 200
+    assert "application" in res_view.headers.get("content-type", "")
+
+    res_reveal = client.post("/api/documents/reveal", json={"doc_id": doc_id})
+    assert res_reveal.status_code == 200
+    assert res_reveal.json()["success"] is True
+    assert "path" in res_reveal.json()
+    assert Path(res_reveal.json()["path"]).exists()
+
+    res_open = client.post("/api/documents/open", json={"doc_id": doc_id})
+    assert res_open.status_code == 200
+    assert res_open.json()["success"] is True
+
+    # 4. Delete individual document
     res_del = client.delete(f"/api/documents/{doc_id}")
     assert res_del.status_code == 200
     assert res_del.json()["success"] is True
     # Verify disk deletion
     assert not Path(found["file_path"]).exists()
+
+    # 5. Test individual document deletion for generated test items
+    r_a = client.post("/api/documents/generate", json={"doc_type": "pptx", "topic": "Deck A"}).json()
+    r_b = client.post("/api/documents/generate", json={"doc_type": "pdf", "topic": "Report B"}).json()
+    if r_a.get("doc_id"):
+        client.delete(f"/api/documents/{r_a['doc_id']}")
+    if r_b.get("doc_id"):
+        client.delete(f"/api/documents/{r_b['doc_id']}")
 
 
 def test_websocket_remote_pairing():

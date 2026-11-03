@@ -304,6 +304,38 @@ class ToolRegistry:
             completion_criterion="Executive PDF report created."
         ))
 
+        self.register(ToolDefinition(
+            name="file_generate_docx",
+            agent="File Agent",
+            description="Generates a publication-grade Word document (.docx) with structured sections, tables, and formatting.",
+            parameters={
+                "topic": {"type": "string", "description": "Subject or topic of Word document"},
+                "filename": {"type": "string", "optional": True},
+                "sections": {"type": "array", "optional": True},
+                "theme": {"type": "string", "default": "enterprise"}
+            },
+            category=ActionCategory.FILE_WRITE.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.generate_word_document,
+            completion_criterion="Word .docx document created."
+        ))
+
+        self.register(ToolDefinition(
+            name="file_generate_xlsx",
+            agent="File Agent",
+            description="Generates a professional Excel workbook (.xlsx) with styled sheets, metric tables, and formula calculations.",
+            parameters={
+                "topic": {"type": "string", "description": "Subject or title of Excel spreadsheet"},
+                "filename": {"type": "string", "optional": True},
+                "sheets_data": {"type": "array", "optional": True},
+                "theme": {"type": "string", "default": "modern_blue"}
+            },
+            category=ActionCategory.FILE_WRITE.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.generate_excel_spreadsheet,
+            completion_criterion="Excel .xlsx spreadsheet created."
+        ))
+
         # ----------------- SYSTEM AGENT TOOLS -----------------
         self.register(ToolDefinition(
             name="system_telemetry",

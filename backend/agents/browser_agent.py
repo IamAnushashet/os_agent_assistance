@@ -105,14 +105,24 @@ class BrowserAgent:
         return browsers[0]
 
     def focus_browser(self, hwnd: Optional[int] = None) -> bool:
-        """Brings the existing browser window to foreground."""
+        """Brings the existing browser window to foreground reliably."""
+        from screen_capture import ensure_interactive_desktop
+        ensure_interactive_desktop()
         target_hwnd = hwnd or (self.get_primary_browser() or {}).get("hwnd")
         if not target_hwnd:
             return False
+        
+        # Windows API reliable foreground activation
+        VK_MENU = 0x12
+        KEYEVENTF_KEYUP = 0x0002
+        user32.keybd_event(VK_MENU, 0, 0, 0)
         user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE
+        user32.BringWindowToTop(target_hwnd)
         user32.SetForegroundWindow(target_hwnd)
+        user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+        
         self.last_active_hwnd = target_hwnd
-        time.sleep(0.15)
+        time.sleep(0.1)
         return True
 
     def get_open_tabs(self, hwnd: Optional[int] = None) -> Dict[str, Any]:
@@ -174,14 +184,18 @@ class BrowserAgent:
                 "tabs": [{"id": 1, "title": browser["title"], "is_active": True}]
             }
 
-    async def navigate(self, url: str, hwnd: Optional[int] = None) -> Dict[str, Any]:
-        """Navigates existing browser to URL by activating address bar via Ctrl+L."""
+    async def navigate(self, url: str, hwnd: Optional[int] = None, in_new_tab: bool = True) -> Dict[str, Any]:
+        """
+        Navigates browser to URL.
+        By default (in_new_tab=True), always opens in a fresh NEW tab (Ctrl+T)
+        to protect whatever page/work the user currently has open.
+        """
         if not url.startswith(("http://", "https://", "file://")):
             url = f"https://{url}"
 
         focused = self.focus_browser(hwnd)
         if not focused:
-            # If no browser is currently open, launch default browser with URL
+            # If no browser is currently open, launch default browser with URL in new window/tab
             import os
             os.startfile(url)
             await asyncio.sleep(1.5)
@@ -190,16 +204,22 @@ class BrowserAgent:
                 "success": True,
                 "action": "navigate",
                 "url": url,
-                "message": f"Opened default browser and navigated to {url}"
+                "new_tab": True,
+                "message": f"Opened default browser and navigated to {url} in a new tab"
             }
 
-        # Ctrl+L highlights the browser address bar
-        controller.hotkey("ctrl", "l")
-        await asyncio.sleep(0.1)
-        controller.type_text(url)
-        await asyncio.sleep(0.05)
+        # ALWAYS open a fresh new tab for any browser activity
+        if in_new_tab:
+            controller.hotkey("ctrl", "t")
+            await asyncio.sleep(0.25)
+        else:
+            controller.hotkey("ctrl", "l")
+            await asyncio.sleep(0.12)
+
+        controller.paste_text(url)
+        await asyncio.sleep(0.08)
         controller.press_key("enter")
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.8)
 
         primary = self.get_primary_browser()
         new_title = primary["title"] if primary else ""
@@ -208,11 +228,13 @@ class BrowserAgent:
             "success": True,
             "action": "navigate",
             "url": url,
+            "new_tab": in_new_tab,
             "browser_title": new_title,
-            "message": f"Navigated existing browser to {url}"
+            "message": f"Navigated to {url} in a new browser tab"
         }
 
     async def search(self, query: str, engine: str = "google", hwnd: Optional[int] = None) -> Dict[str, Any]:
+        """Performs web search in a brand new browser tab."""
         import urllib.parse
         encoded = urllib.parse.quote(query)
         if engine == "bing":
@@ -221,7 +243,7 @@ class BrowserAgent:
             url = f"https://duckduckgo.com/?q={encoded}"
         else:
             url = f"https://www.google.com/search?q={encoded}"
-        res = await self.navigate(url, hwnd=hwnd)
+        res = await self.navigate(url, hwnd=hwnd, in_new_tab=True)
         res["query"] = query
         return res
 
@@ -233,12 +255,31 @@ class BrowserAgent:
         return {"success": True, "action": "scroll", "direction": direction, "amount": amount}
 
     async def new_tab(self, url: Optional[str] = None, hwnd: Optional[int] = None) -> Dict[str, Any]:
-        self.focus_browser(hwnd)
+        """Focuses browser and opens a fresh new tab (Ctrl+T), optionally loading a URL."""
+        focused = self.focus_browser(hwnd)
+        if not focused:
+            import os
+            target = url or "https://www.google.com"
+            os.startfile(target)
+            await asyncio.sleep(1.5)
+            self.focus_browser()
+            return {"success": True, "action": "new_tab", "url": target, "message": f"Opened browser in a new tab: {target}"}
+
         controller.hotkey("ctrl", "t")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.25)
         if url:
-            return await self.navigate(url, hwnd)
-        return {"success": True, "action": "new_tab", "message": "Opened new browser tab"}
+            if not url.startswith(("http://", "https://", "file://")):
+                url = f"https://{url}"
+            controller.paste_text(url)
+            await asyncio.sleep(0.08)
+            controller.press_key("enter")
+            await asyncio.sleep(0.8)
+            return {"success": True, "action": "new_tab", "url": url, "message": f"Opened new browser tab and navigated to {url}"}
+        return {"success": True, "action": "new_tab", "message": "Opened fresh new browser tab"}
+
+    async def focus_and_open_new_tab(self, url: Optional[str] = None, hwnd: Optional[int] = None) -> Dict[str, Any]:
+        """Brings browser to front and opens a brand-new tab, keeping existing tabs intact."""
+        return await self.new_tab(url=url, hwnd=hwnd)
 
     async def close_tab(self, hwnd: Optional[int] = None) -> Dict[str, Any]:
         self.focus_browser(hwnd)

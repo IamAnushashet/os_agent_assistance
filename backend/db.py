@@ -269,6 +269,20 @@ def get_recent_audit_logs(limit: int = 50) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def clear_audit_logs() -> int:
+    """Wipes all security audit logs from the database."""
+    conn = get_db_connection()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM audit_logs")
+            count = cur.rowcount
+            logger.info(f"Cleared {count} audit log(s) from database.")
+            return count
+    finally:
+        conn.close()
+
+
 def recover_stale_tasks():
     """Startup crash recovery: resets interrupted tasks from prior crashed process."""
     conn = get_db_connection()
@@ -367,10 +381,11 @@ def save_generated_document(
             INSERT INTO generated_documents (id, task_id, filename, file_path, file_type, topic, size_bytes, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(file_path) DO UPDATE SET
+                id=excluded.id,
                 filename=excluded.filename,
                 size_bytes=excluded.size_bytes,
                 topic=excluded.topic,
-                created_at=CURRENT_TIMESTAMP
+                task_id=COALESCE(excluded.task_id, generated_documents.task_id)
             """, (doc_id, task_id, filename, str(file_path), file_type.upper(), topic, size_bytes))
         logger.info(f"Document registered in DB: {filename} ({file_type}, {size_bytes} bytes)")
         return {
@@ -406,14 +421,43 @@ def list_generated_documents(limit: int = 50) -> List[Dict[str, Any]]:
 
 def get_generated_document(doc_id: str) -> Optional[Dict[str, Any]]:
     """
-    Retrieves a single generated document record by ID.
+    Retrieves a single generated document record by ID or fallback matching.
     """
     conn = get_db_connection()
     try:
         cur = conn.cursor()
         cur.execute("SELECT * FROM generated_documents WHERE id = ?", (doc_id,))
         row = cur.fetchone()
-        return dict(row) if row else None
+        if row:
+            return dict(row)
+
+        # Fallback 1: match by filename if doc_id was actually a filename
+        cur.execute("SELECT * FROM generated_documents WHERE filename = ? OR filename LIKE ?", (doc_id, f"%{doc_id}%"))
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+
+        # Fallback 2: check if doc_id is embedded in any task completion report
+        cur.execute("SELECT completion_report_json FROM tasks WHERE completion_report_json LIKE ?", (f"%{doc_id}%",))
+        t_row = cur.fetchone()
+        if t_row and t_row[0]:
+            try:
+                import json
+                t_rep = json.loads(t_row[0])
+                c_doc = t_rep.get("created_document")
+                if c_doc and c_doc.get("file_path"):
+                    return {
+                        "id": doc_id,
+                        "filename": c_doc.get("filename", ""),
+                        "file_path": c_doc.get("file_path", ""),
+                        "file_type": c_doc.get("file_type", "PDF"),
+                        "topic": c_doc.get("title", ""),
+                        "size_bytes": c_doc.get("size_bytes", 0)
+                    }
+            except Exception:
+                pass
+
+        return None
     finally:
         conn.close()
 

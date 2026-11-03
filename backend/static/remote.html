@@ -3,405 +3,657 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Nexus OS // Phone Remote & Web Controller</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>OS Agent // Mobile Remote & Controller</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0b0f19;
-      --card: #1e293b;
-      --card-hover: #27354a;
-      --card-border: #334155;
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #0c0c0e;
+      --card: #18181b;
+      --card-hover: #222227;
+      --card-border: #27272a;
+      --accent: #10a37f;
+      --accent-hover: #0d8365;
+      --accent-blue: #3b82f6;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
       --danger: #ef4444;
-      --amber: #f59e0b;
-      --emerald: #10b981;
-      --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --warning: #f59e0b;
+      --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', Consolas, monospace;
     }
+
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
       user-select: none;
       -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
       font-family: var(--font-main);
     }
+
     body {
       background-color: var(--bg);
       color: var(--text);
       height: 100vh;
       height: 100dvh;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
     }
 
     /* Top Header */
     header {
-      height: 44px;
-      background: #0f172a;
+      height: 42px;
+      background: #141417;
       border-bottom: 1px solid var(--card-border);
       padding: 0 12px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
-      z-index: 20;
+      z-index: 50;
     }
+
     .brand {
-      font-size: 13px;
-      font-weight: 600;
       display: flex;
       align-items: center;
       gap: 8px;
-    }
-    .brand-title {
-      color: var(--text);
+      font-size: 13.5px;
       font-weight: 700;
-      letter-spacing: 0.3px;
-    }
-    .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--danger);
-      transition: background 0.2s ease;
-    }
-    .dot.connected {
-      background: var(--emerald);
-      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+      letter-spacing: -0.2px;
     }
 
-    .header-actions {
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 6px var(--danger);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .status-dot.connected {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .header-pills {
       display: flex;
       align-items: center;
       gap: 6px;
     }
-    .btn-emergency {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #fca5a5;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    .btn-emergency:active {
-      background: var(--danger);
-      color: white;
+
+    .status-tag {
+      font-size: 10.5px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      font-weight: 600;
     }
 
-    /* Screen Mirror */
-    #screen-container {
-      height: 28vh;
-      background: #000;
+    .btn-header {
+      background: #222226;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .btn-emergency {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #fca5a5;
+      font-weight: 700;
+    }
+    .btn-emergency.active-stop {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .btn-speaker {
+      background: transparent;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .btn-speaker.muted {
+      opacity: 0.4;
+    }
+
+    /* Emergency Stop Banner */
+    #mobile-emergency-banner {
+      display: none;
+      background: #ef4444;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 11px;
+      text-align: center;
+      padding: 6px;
+      cursor: pointer;
+      z-index: 60;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Section 1: Screen Mirror */
+    .screen-section {
+      height: 31%;
+      min-height: 150px;
+      max-height: 270px;
+      background: #000000;
+      border-bottom: 1px solid var(--card-border);
       position: relative;
       display: flex;
-      align-items: center;
       justify-content: center;
-      border-bottom: 1px solid var(--card-border);
+      align-items: center;
       overflow: hidden;
       flex-shrink: 0;
     }
+
+    .screen-wrapper {
+      position: relative;
+      display: inline-flex;
+      max-width: 100%;
+      max-height: 100%;
+      justify-content: center;
+      align-items: center;
+    }
+
     #screen-view {
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
+      cursor: crosshair;
+      display: block;
     }
-    .screen-overlay {
+
+    .cursor-beacon {
       position: absolute;
-      top: 6px;
-      right: 8px;
-      font-size: 10px;
-      font-family: var(--font-mono);
-      color: #38bdf8;
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid var(--card-border);
-      padding: 2px 7px;
-      border-radius: 4px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: rgba(16, 163, 127, 0.45);
+      border: 2px solid #10a37f;
+      box-shadow: 0 0 10px #10a37f, 0 0 20px rgba(16, 163, 127, 0.6);
       pointer-events: none;
-    }
-
-    /* Scrollable Toolbars */
-    .bars-container {
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      background: #0f172a;
-      border-bottom: 1px solid var(--card-border);
-    }
-
-    .tools-bar {
-      display: flex;
-      gap: 5px;
-      padding: 5px 8px;
-      overflow-x: auto;
-      white-space: nowrap;
-      -webkit-overflow-scrolling: touch;
-    }
-    .tools-bar::-webkit-scrollbar {
+      transform: translate(-50%, -50%);
+      transition: left 0.05s ease-out, top 0.05s ease-out;
+      z-index: 15;
       display: none;
     }
 
-    .tools-bar.browser-bar {
-      border-bottom: 1px solid rgba(51, 65, 85, 0.4);
-      background: rgba(30, 41, 59, 0.4);
-    }
-
-    .btn-bar-item {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
-      padding: 5px 9px;
-      border-radius: 5px;
-      white-space: nowrap;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex-shrink: 0;
-      transition: all 0.1s ease;
-    }
-    .btn-bar-item:active {
-      background: var(--accent);
-      color: white;
-      border-color: var(--accent);
-    }
-    .btn-bar-item.highlight {
-      background: rgba(59, 130, 246, 0.15);
-      border-color: rgba(59, 130, 246, 0.4);
-      color: #93c5fd;
-    }
-
-    /* Virtual Trackpad */
-    #trackpad {
-      flex: 1;
-      background: var(--card);
-      margin: 6px 8px;
-      border-radius: 8px;
-      border: 1px dashed var(--card-border);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      touch-action: none;
-      min-height: 80px;
-    }
-    .trackpad-hint {
-      font-size: 11px;
-      color: var(--text-muted);
-      pointer-events: none;
-      text-align: center;
-      line-height: 1.5;
-    }
-    .trackpad-hint b {
-      color: var(--text);
-      font-size: 12px;
-    }
-
-    /* Mouse Action Helpers */
-    .mouse-actions {
+    .screen-overlay-bar {
+      position: absolute;
+      top: 6px;
+      right: 8px;
       display: flex;
       gap: 6px;
-      padding: 0 8px 6px;
-      flex-shrink: 0;
+      z-index: 20;
     }
-    .btn-mouse {
+
+    .screen-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .screen-badge .rec-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulseRec 1.2s infinite;
+    }
+
+    @keyframes pulseRec {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+
+    /* Section 2: Virtual Trackpad & Controls */
+    .trackpad-section {
       flex: 1;
-      background: var(--card);
-      border: 1px solid var(--card-border);
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow: hidden;
+      background: #0e0e11;
+    }
+
+    .quick-keys-row {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+      padding-bottom: 2px;
+    }
+    .quick-keys-row::-webkit-scrollbar { display: none; }
+
+    .key-btn {
+      background: #1b1b1f;
+      border: 1px solid #2b2b30;
       color: var(--text-muted);
-      padding: 7px;
+      padding: 4px 8px;
       border-radius: 6px;
       font-size: 11px;
       font-weight: 600;
+      white-space: nowrap;
       cursor: pointer;
-      text-align: center;
-      transition: all 0.1s ease;
     }
-    .btn-mouse:active, .btn-mouse.active {
-      background: #2563eb;
-      border-color: #3b82f6;
-      color: white;
-    }
-    .btn-mouse.drag-active {
-      background: var(--amber);
-      color: #0b0f19;
-      border-color: var(--amber);
+    .key-btn:active {
+      background: #333339;
+      color: #fff;
     }
 
-    /* Live Status Banner */
-    .status-toast {
-      padding: 4px 10px;
-      background: #0f172a;
+    .trackpad-surface {
+      flex: 1;
+      min-height: 100px;
+      background: radial-gradient(circle at center, #18181c 0%, #111114 100%);
+      border: 1.5px solid #27272c;
+      border-radius: 12px;
+      position: relative;
+      touch-action: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+      cursor: crosshair;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .trackpad-surface.touch-active {
+      border-color: var(--accent);
+      background: radial-gradient(circle at center, #202026 0%, #141418 100%);
+      box-shadow: inset 0 0 16px rgba(16, 163, 127, 0.25);
+    }
+
+    .trackpad-hint {
+      color: #555560;
+      font-size: 11px;
+      text-align: center;
+      pointer-events: none;
+      line-height: 1.4;
+    }
+    .trackpad-hint b {
+      color: #888898;
+      font-size: 11.5px;
+    }
+
+    .mouse-actions-row {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 1.5fr;
+      gap: 6px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+
+    .btn-mouse {
+      background: #202025;
+      border: 1px solid #323238;
+      color: var(--text);
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: background 0.1s, transform 0.08s;
+    }
+    .btn-mouse:active {
+      background: #363640;
+      transform: scale(0.97);
+    }
+    .btn-mouse.holding {
+      background: #d97706;
+      border-color: #f59e0b;
+      color: #ffffff;
+    }
+
+    /* Section 3: AI OS Agent Prompt & Chat */
+    .llm-section {
+      background: #141418;
       border-top: 1px solid var(--card-border);
-      font-size: 10.5px;
-      font-family: var(--font-mono);
-      color: var(--text-muted);
+      padding: 6px 10px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .agent-feedback-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      flex-shrink: 0;
+      background: #1c1c22;
+      border: 1px solid #292930;
+      border-radius: 8px;
+      padding: 5px 8px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      cursor: pointer;
+      min-height: 26px;
     }
-    .status-toast .toast-text {
+
+    .feedback-text {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       flex: 1;
     }
-    .status-toast .toast-indicator {
-      color: var(--emerald);
-      font-size: 9.5px;
-      font-weight: 700;
-      margin-left: 6px;
-      flex-shrink: 0;
+    .feedback-text b {
+      color: var(--accent);
     }
 
-    /* Command / Web Search Footer */
-    footer {
-      padding: 6px 8px 8px;
-      background: #0f172a;
-      border-top: 1px solid var(--card-border);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      flex-shrink: 0;
+    .chat-toggle-btn {
+      font-size: 10.5px;
+      color: var(--accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding-left: 6px;
+      font-weight: 600;
     }
-    .input-row {
+
+    .prompt-input-row {
       display: flex;
-      gap: 6px;
       align-items: center;
+      gap: 6px;
+      background: #1e1e24;
+      border: 1px solid #31313a;
+      border-radius: 20px;
+      padding: 4px 6px 4px 10px;
     }
-    .cmd-input {
-      flex: 1;
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      color: white;
-      padding: 8px 10px;
-      border-radius: 6px;
-      font-size: 12.5px;
-      outline: none;
-    }
-    .cmd-input:focus {
+    .prompt-input-row:focus-within {
       border-color: var(--accent);
     }
 
-    .btn-icon {
-      width: 34px;
-      height: 34px;
-      border-radius: 6px;
-      background: var(--card);
-      border: 1px solid var(--card-border);
+    .prompt-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
       color: var(--text);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      cursor: pointer;
-      flex-shrink: 0;
+      font-size: 13px;
+      padding: 4px 0;
+      user-select: auto;
+      -webkit-user-select: auto;
     }
-    .btn-icon.active {
-      background: var(--danger);
-      color: white;
+    .prompt-input::placeholder {
+      color: #63636e;
     }
 
-    .action-buttons-row {
-      display: flex;
-      gap: 6px;
-    }
-    .btn-action-main {
-      flex: 1.2;
-      background: var(--accent);
-      border: 1px solid var(--accent);
-      color: white;
-      font-size: 11.5px;
-      font-weight: 700;
-      padding: 7px;
-      border-radius: 6px;
-      cursor: pointer;
+    .btn-mic {
+      background: #2b2b34;
+      border: none;
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      transition: background 0.15s ease;
+      cursor: pointer;
+      font-size: 14px;
+      flex-shrink: 0;
     }
-    .btn-action-main:active {
+    .btn-mic.listening {
+      background: var(--danger);
+      color: #fff;
+      animation: pulseMic 1s infinite alternate;
+    }
+
+    @keyframes pulseMic {
+      from { transform: scale(1); }
+      to { transform: scale(1.12); }
+    }
+
+    .btn-send {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .btn-send:active {
       background: var(--accent-hover);
     }
 
-    .btn-action-sub {
-      flex: 1;
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      color: var(--text-secondary);
-      font-size: 11px;
+    /* Mode Action Chips */
+    .mode-chips-row {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .mode-chips-row::-webkit-scrollbar { display: none; }
+
+    .chip-btn {
+      background: #1b1b22;
+      border: 1px solid #2d2d38;
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 10px;
       font-weight: 600;
-      padding: 7px;
-      border-radius: 6px;
       cursor: pointer;
+      white-space: nowrap;
+    }
+    .chip-btn.active {
+      background: rgba(16, 163, 127, 0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .chip-btn:active {
+      background: #2d2d38;
+      color: #fff;
+    }
+
+    /* Slide-Up Chat Drawer */
+    .chat-drawer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 72%;
+      background: #18181c;
+      border-top: 1px solid #363640;
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.8);
+      display: none;
+      flex-direction: column;
+      z-index: 200;
+      animation: slideUp 0.2s ease;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .chat-drawer.open {
+      display: flex;
+    }
+
+    .drawer-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid #2a2a32;
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 4px;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
     }
-    .btn-action-sub:active {
-      background: var(--card-hover);
-      color: white;
-      border-color: var(--accent);
+
+    .drawer-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    .drawer-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chat-bubble {
+      max-width: 86%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 12.5px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 3px;
+    }
+    .chat-bubble.assistant {
+      align-self: flex-start;
+      background: #24242b;
+      color: var(--text);
+      border-bottom-left-radius: 3px;
+      border: 1px solid #33333e;
+    }
+    .action-tag {
+      display: inline-block;
+      margin-top: 5px;
+      padding: 2px 7px;
+      background: rgba(59, 130, 246, 0.15);
+      border-radius: 4px;
+      font-size: 10.5px;
+      color: #93c5fa;
+      font-family: var(--font-mono);
+    }
+
+    /* Document Card in Drawer */
+    .doc-card {
+      background: #1e1e26;
+      border: 1px solid #333342;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .doc-card-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      flex: 1;
+    }
+    .doc-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .doc-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
     }
 
     /* Pairing Modal */
     #pin-modal {
+      display: none;
       position: fixed;
       inset: 0;
-      background: rgba(3, 5, 12, 0.85);
-      backdrop-filter: blur(12px);
-      display: flex;
+      background: rgba(0, 0, 0, 0.88);
+      backdrop-filter: blur(8px);
+      z-index: 9999;
       align-items: center;
       justify-content: center;
-      z-index: 9999;
+      padding: 20px;
     }
-    .modal-box {
-      background: #1e293b;
+    .pin-box {
+      background: #18181b;
       border: 1px solid var(--card-border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 24px;
-      width: 88%;
       max-width: 320px;
+      width: 100%;
       text-align: center;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
     }
     .pin-input {
       width: 140px;
-      margin: 16px auto;
-      font-size: 22px;
-      font-family: var(--font-mono);
-      letter-spacing: 5px;
       text-align: center;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 8px;
       padding: 8px;
-      background: #0f172a;
-      border: 1px solid var(--card-border);
-      color: #38bdf8;
+      background: #0c0c0e;
+      border: 2px solid var(--accent);
       border-radius: 8px;
+      color: #fff;
       outline: none;
+      margin: 14px auto;
+      font-family: var(--font-mono);
     }
     .btn-pair {
       width: 100%;
-      background: var(--accent);
-      color: white;
       padding: 10px;
-      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
       border: none;
-      font-size: 13.5px;
+      border-radius: 8px;
+      font-size: 14px;
       font-weight: 700;
       cursor: pointer;
     }
@@ -409,152 +661,267 @@
 </head>
 <body>
 
-  <!-- Pairing Modal -->
-  <div id="pin-modal">
-    <div class="modal-box">
-      <h3 style="font-size:16px; margin-bottom:6px;">Pair with Windows Laptop</h3>
-      <p style="font-size:12px; color:var(--text-muted);">Enter 4-digit PIN (Default: <b>4826</b>)</p>
-      <input type="tel" id="input-pin" class="pin-input" maxlength="4" placeholder="••••" value="4826" autofocus>
-      <button class="btn-pair" id="btn-pair">Connect Over LAN</button>
-    </div>
-  </div>
-
-  <!-- Header -->
+  <!-- Top Header -->
   <header>
     <div class="brand">
-      <div id="status-dot" class="dot"></div>
-      <span class="brand-title">NEXUS REMOTE</span>
+      <div id="status-dot" class="status-dot"></div>
+      <span>OS Agent Remote</span>
     </div>
-    <div class="header-actions">
-      <button id="btn-stop" class="btn-emergency">🛑 STOP</button>
+    <div class="header-pills">
+      <button class="btn-header btn-emergency" id="mobile-stop-btn" onclick="toggleEmergencyStopMobile()">🛑 STOP</button>
+      <span class="status-tag" id="status-tag">Connecting...</span>
+      <button class="btn-speaker" id="btn-mobile-tts" onclick="toggleMobileTts()" title="Toggle Voice Output">🔊</button>
+      <button class="btn-header" onclick="refreshScreenInstant()" title="Refresh screen snapshot">📸 Sync</button>
     </div>
   </header>
 
-  <!-- Live Desktop Mirror -->
-  <div id="screen-container">
-    <img id="screen-view" alt="Screen Mirror">
-    <div id="screen-status" class="screen-overlay">CONNECTING...</div>
+  <!-- Emergency Stop Banner -->
+  <div id="mobile-emergency-banner" onclick="clearEmergencyStopMobile()">
+    🛑 EMERGENCY STOP ACTIVE — TAP TO RESUME AGENTS
   </div>
 
-  <!-- Dual Control Bars -->
-  <div class="bars-container">
-    <!-- Web Application & Browser Control Row -->
-    <div class="tools-bar browser-bar">
-      <button class="btn-bar-item highlight" data-browser="address_bar">🌐 Address Bar (Ctrl+L)</button>
-      <button class="btn-bar-item" data-browser="new_tab">➕ New Tab</button>
-      <button class="btn-bar-item" data-browser="refresh">🔄 Refresh (F5)</button>
-      <button class="btn-bar-item" data-browser="back">⟵ Back</button>
-      <button class="btn-bar-item" data-browser="forward">⟶ Next</button>
-      <button class="btn-bar-item" data-browser="close_tab">✕ Close Tab</button>
-      <button class="btn-bar-item" data-browser="scroll_up">⬆ Page Up</button>
-      <button class="btn-bar-item" data-browser="scroll_down">⬇ Page Down</button>
+  <main>
+    <!-- Section 1: Live PC Screen Mirror -->
+    <div class="screen-section" id="screen-section">
+      <div class="screen-wrapper" id="screen-wrapper">
+        <img id="screen-view" alt="Desktop Screen Mirror" />
+        <div id="cursor-beacon" class="cursor-beacon"></div>
+      </div>
+      <div class="screen-overlay-bar">
+        <div class="screen-badge">
+          <span class="rec-dot"></span>
+          <span>LIVE</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Windows Navigation & Shortcuts Row -->
-    <div class="tools-bar">
-      <button class="btn-bar-item" data-key="win">🪟 Win</button>
-      <button class="btn-bar-item" data-hotkey="alt,tab">⇄ Alt+Tab</button>
-      <button class="btn-bar-item" data-key="enter">↵ Enter</button>
-      <button class="btn-bar-item" data-key="backspace">⌫ Backspace</button>
-      <button class="btn-bar-item" data-key="escape">Esc</button>
-      <button class="btn-bar-item" data-key="tab">Tab</button>
-      <button class="btn-bar-item" data-hotkey="ctrl,c">Ctrl+C</button>
-      <button class="btn-bar-item" data-hotkey="ctrl,v">Ctrl+V</button>
-      <button class="btn-bar-item" data-hotkey="win,shift,s">✂️ Snip</button>
-    </div>
-  </div>
+    <!-- Section 2: Virtual Trackpad & Controls -->
+    <div class="trackpad-section">
+      <!-- Quick Keys Pill Bar -->
+      <div class="quick-keys-row">
+        <button class="key-btn" onclick="sendKey('win')">🪟 Win</button>
+        <button class="key-btn" onclick="sendKey('enter')">⏎ Enter</button>
+        <button class="key-btn" onclick="sendKey('backspace')">⌫ Backspace</button>
+        <button class="key-btn" onclick="sendKey('escape')">Esc</button>
+        <button class="key-btn" onclick="sendHotkey(['ctrl', 'c'])">Ctrl+C</button>
+        <button class="key-btn" onclick="sendHotkey(['ctrl', 'v'])">Ctrl+V</button>
+        <button class="key-btn" onclick="sendHotkey(['win', 'd'])">Desktop</button>
+        <button class="key-btn" onclick="sendHotkey(['win', 'shift', 's'])">✂️ Snip</button>
+        <button class="key-btn" onclick="promptDirectType()">⌨️ Type...</button>
+      </div>
 
-  <!-- Virtual Trackpad -->
-  <div id="trackpad">
-    <div class="trackpad-hint">
-      <b>Virtual Trackpad Active</b><br>
-      • Drag 1 Finger: Move Cursor<br>
-      • Tap 1 Finger: Left Click<br>
-      • Tap 2 Fingers: Right Click<br>
-      • Drag 2 Fingers: Scroll Window
-    </div>
-  </div>
+      <!-- Tactile Virtual Trackpad -->
+      <div id="trackpad-pad" class="trackpad-surface">
+        <div class="trackpad-hint">
+          <b>Virtual Trackpad</b><br>
+          • Drag finger to move cursor<br>
+          • Tap for Left Click • 2 fingers to scroll
+        </div>
+      </div>
 
-  <!-- Mouse Action Helpers -->
-  <div class="mouse-actions">
-    <button class="btn-mouse" id="btn-click-left">Left Click</button>
-    <button class="btn-mouse" id="btn-drag">Hold Drag</button>
-    <button class="btn-mouse" id="btn-click-right">Right Click</button>
-  </div>
-
-  <!-- Live Status Toast -->
-  <div class="status-toast">
-    <span class="toast-text" id="status-toast-text">Ready for remote command</span>
-    <span class="toast-indicator" id="status-indicator">ONLINE</span>
-  </div>
-
-  <!-- Command & Web Search Footer -->
-  <footer>
-    <div class="input-row">
-      <button class="btn-icon" id="btn-mic" title="Voice Input">🎙️</button>
-      <input type="text" id="cmd-text" class="cmd-input" placeholder="Type to search web or instruct PC..." autocomplete="off">
+      <!-- Mouse Buttons -->
+      <div class="mouse-actions-row">
+        <button class="btn-mouse" id="btn-left-click" onclick="sendClick('left')">
+          🖱️ Left Click
+        </button>
+        <button class="btn-mouse" id="btn-drag-lock" onclick="toggleDragLock()">
+          ✋ Hold Drag
+        </button>
+        <button class="btn-mouse" id="btn-right-click" onclick="sendClick('right')">
+          Right Click
+        </button>
+      </div>
     </div>
 
-    <div class="action-buttons-row">
-      <!-- 1. Instant Web Search (User's primary request) -->
-      <button class="btn-action-main" id="btn-search-web" title="Instantly search in web browser">
-        🔍 Search Web App
-      </button>
+    <!-- Section 3: AI OS Agent Prompt & Chat -->
+    <div class="llm-section">
+      <!-- Live Feedback Ticker -->
+      <div class="agent-feedback-bar" onclick="toggleChatDrawer()">
+        <span class="feedback-text" id="feedback-text">
+          🤖 <b>OS Agent</b>: Ready for your command
+        </span>
+        <button class="chat-toggle-btn" id="chat-toggle-btn">History ▲</button>
+      </div>
 
-      <!-- 2. Direct Type & Submit into whatever active window/search box is focused on PC -->
-      <button class="btn-action-sub" id="btn-type-enter" title="Type text directly into focused field on PC">
-        ⌨️ Type & Enter
-      </button>
+      <!-- Textbox & Voice Command Bar -->
+      <div class="prompt-input-row">
+        <button class="btn-mic" id="btn-voice" onclick="toggleVoiceInput()" title="Voice input">
+          🎙️
+        </button>
+        <input 
+          type="text" 
+          id="prompt-input" 
+          class="prompt-input" 
+          placeholder="Instruct OS Agent (e.g. open chrome, create ppt)..." />
+        <button class="btn-send" onclick="sendAction()" title="Send instruction">
+          ➤
+        </button>
+      </div>
 
-      <!-- 3. Autonomous Multi-Agent Mission -->
-      <button class="btn-action-sub" id="btn-send-agent" title="Dispatch multi-agent autonomous mission">
-        🤖 Agent Run
-      </button>
+      <!-- Mode Chips -->
+      <div class="mode-chips-row">
+        <button class="chip-btn active" id="chip-agent" onclick="setMode('agent')">🤖 Agent Run</button>
+        <button class="chip-btn" id="chip-search" onclick="setMode('search')">🔍 Search Web</button>
+        <button class="chip-btn" id="chip-type" onclick="setMode('type')">⌨️ Type to PC</button>
+      </div>
     </div>
-  </footer>
+
+    <!-- Slide-Up Chat History Sheet (Drawer) -->
+    <div class="chat-drawer" id="chat-drawer">
+      <div class="drawer-header">
+        <span>OS Agent Conversation</span>
+        <button class="drawer-close" onclick="toggleChatDrawer()">✕</button>
+      </div>
+      <div class="drawer-messages" id="drawer-messages">
+        <div class="chat-bubble assistant">
+          👋 I'm your Autonomous Windows OS Agent. Type or speak any instruction, and I'll execute it directly on your PC!
+        </div>
+      </div>
+    </div>
+
+    <!-- PIN Pairing Modal -->
+    <div id="pin-modal">
+      <div class="pin-box">
+        <div style="font-size:32px; margin-bottom:6px;">🔐</div>
+        <h3 style="font-size:16px; margin-bottom:4px; color:#fff;">Pair Mobile Remote</h3>
+        <p style="font-size:12px; color:#a1a1aa; margin-bottom:12px;">Enter 4-digit PIN (Default: <b>4826</b>)</p>
+        <input type="tel" id="pin-input" class="pin-input" maxlength="4" value="4826" autofocus />
+        <div id="pin-error" style="color:#ef4444; font-size:11.5px; margin-bottom:12px; display:none;">Invalid PIN. Please try again.</div>
+        <button class="btn-pair" onclick="submitPairingPin()">Connect to PC</button>
+      </div>
+    </div>
+  </main>
 
   <script>
     const API_BASE = window.location.origin;
     let ws = null;
-    let isHoldDragging = false;
-    let touchStartX = 0, touchStartY = 0;
-    let lastTouchX = 0, lastTouchY = 0;
-    let touchStartTime = 0;
-    let initialTouchCount = 0;
+    let isConnected = false;
+    let dragLocked = false;
+    let screenRes = { width: 1920, height: 1080 };
+    let mobileEmergencyStopped = false;
+    let mobileTtsEnabled = localStorage.getItem('os_agent_mobile_tts') !== 'false';
+    let activeMode = 'agent'; // 'agent', 'search', 'type'
 
-    const screenView = document.getElementById('screen-view');
-    const screenStatus = document.getElementById('screen-status');
+    // URL token handling
+    const urlParams = new URLSearchParams(window.location.search);
+    let activeToken = urlParams.get('token') || localStorage.getItem('nexus_remote_token') || '';
+
+    // DOM Elements
     const statusDot = document.getElementById('status-dot');
-    const trackpad = document.getElementById('trackpad');
-    const btnStop = document.getElementById('btn-stop');
-    const btnDrag = document.getElementById('btn-drag');
-    const btnClickLeft = document.getElementById('btn-click-left');
-    const btnClickRight = document.getElementById('btn-click-right');
-    const cmdText = document.getElementById('cmd-text');
-    const btnSearchWeb = document.getElementById('btn-search-web');
-    const btnTypeEnter = document.getElementById('btn-type-enter');
-    const btnSendAgent = document.getElementById('btn-send-agent');
-    const btnMic = document.getElementById('btn-mic');
+    const statusTag = document.getElementById('status-tag');
+    const screenView = document.getElementById('screen-view');
+    const cursorBeacon = document.getElementById('cursor-beacon');
+    const feedbackText = document.getElementById('feedback-text');
+    const drawerMessages = document.getElementById('drawer-messages');
+    const promptInput = document.getElementById('prompt-input');
+    const btnMobileTts = document.getElementById('btn-mobile-tts');
+    const chatDrawer = document.getElementById('chat-drawer');
+    const pad = document.getElementById('trackpad-pad');
     const pinModal = document.getElementById('pin-modal');
-    const inputPin = document.getElementById('input-pin');
-    const btnPair = document.getElementById('btn-pair');
-    const toastText = document.getElementById('status-toast-text');
-    const toastIndicator = document.getElementById('status-indicator');
+    const pinInput = document.getElementById('pin-input');
+    const pinError = document.getElementById('pin-error');
+    const mobileStopBtn = document.getElementById('mobile-stop-btn');
+    const mobileEmergencyBanner = document.getElementById('mobile-emergency-banner');
 
-    function showToast(msg, isSuccess = true) {
-      if (toastText) {
-        toastText.innerText = msg;
-        if (toastIndicator) {
-          toastIndicator.innerText = isSuccess ? "ACTIVE" : "NOTE";
-          toastIndicator.style.color = isSuccess ? "var(--emerald)" : "var(--amber)";
-        }
+    if (btnMobileTts) {
+      btnMobileTts.classList.toggle('muted', !mobileTtsEnabled);
+      btnMobileTts.textContent = mobileTtsEnabled ? '🔊' : '🔇';
+    }
+
+    function setMode(mode) {
+      activeMode = mode;
+      document.querySelectorAll('.chip-btn').forEach(b => b.classList.remove('active'));
+      const activeEl = document.getElementById(`chip-${mode}`);
+      if (activeEl) activeEl.classList.add('active');
+
+      if (mode === 'agent') {
+        promptInput.placeholder = "Instruct OS Agent (e.g. open chrome, create ppt)...";
+      } else if (mode === 'search') {
+        promptInput.placeholder = "Search in browser (e.g. pes university, weather)...";
+      } else if (mode === 'type') {
+        promptInput.placeholder = "Text to type directly into active PC window...";
+      }
+      promptInput.focus();
+    }
+
+    // Load desktop resolution
+    fetch(`${API_BASE}/api/network-info`).then(r => r.json()).then(d => {
+      if (d.screen_width && d.screen_height) {
+        screenRes = { width: d.screen_width, height: d.screen_height };
+      }
+    }).catch(() => {});
+
+    function toggleChatDrawer() {
+      if (chatDrawer) {
+        chatDrawer.classList.toggle('open');
       }
     }
 
-    // Auto-pair token handling
-    const urlParams = new URLSearchParams(window.location.search);
-    let activeToken = urlParams.get('token') || localStorage.getItem('nexus_remote_token') || '';
+    function appendMessage(role, text, docs = []) {
+      if (!drawerMessages) return null;
+      const b = document.createElement('div');
+      b.className = `chat-bubble ${role}`;
+      b.innerHTML = text;
+
+      if (docs && docs.length > 0) {
+        docs.forEach(doc => {
+          const card = document.createElement('div');
+          card.className = 'doc-card';
+          card.innerHTML = `
+            <div class="doc-card-info">
+              <span style="font-size:16px;">${doc.type === 'pptx' ? '📊' : '📄'}</span>
+              <span class="doc-title" title="${doc.name}">${doc.name}</span>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="doc-btn" onclick="openDocInTab('${doc.path}')">↗ Tab</button>
+              <button class="doc-btn" onclick="openDocOnPc('${doc.path}')">💻 PC</button>
+              <button class="doc-btn" onclick="revealDocOnPc('${doc.path}')">📂 Reveal</button>
+            </div>
+          `;
+          b.appendChild(card);
+        });
+      }
+
+      drawerMessages.appendChild(b);
+      drawerMessages.scrollTop = drawerMessages.scrollHeight;
+      return b;
+    }
+
+    function openDocInTab(path) {
+      window.open(`${API_BASE}/api/documents/view?path=${encodeURIComponent(path)}`, '_blank');
+    }
+
+    function openDocOnPc(path) {
+      fetch(`${API_BASE}/api/documents/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: path })
+      }).then(res => res.json()).then(data => {
+        if (data.success) {
+          feedbackText.innerHTML = `💻 <b>Opened on PC:</b> Launched in default application`;
+        } else {
+          alert("Could not open file: " + (data.detail || data.error));
+        }
+      }).catch(e => alert("Could not open file: " + e.message));
+    }
+
+    function revealDocOnPc(path) {
+      fetch(`${API_BASE}/api/documents/reveal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: path })
+      }).then(res => res.json()).then(data => {
+        if (data.success) {
+          feedbackText.innerHTML = `📂 <b>Revealed on PC:</b> Windows File Explorer opened`;
+        } else {
+          alert("Could not reveal file: " + (data.detail || data.error));
+        }
+      }).catch(e => alert("Could not reveal file: " + e.message));
+    }
+
+    // --- WebSocket Connection ---
     let reconnectTimer = null;
+    let prevBlobUrl = null;
 
     function connectWebSocket(pinOverride) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -569,263 +936,405 @@
       ws.binaryType = "blob";
 
       ws.onopen = () => {
-        const pinVal = (pinOverride !== undefined ? pinOverride : (inputPin ? inputPin.value : '4826')).trim();
-        const payload = {
-          pin: pinVal || "4826"
-        };
-        if (activeToken) {
-          payload.token = activeToken;
-        }
+        const pinVal = (pinOverride !== undefined ? pinOverride : (pinInput ? pinInput.value : '4826')).trim();
+        const payload = { pin: pinVal || "4826" };
+        if (activeToken) payload.token = activeToken;
         ws.send(JSON.stringify(payload));
       };
 
-      let prevBlobUrl = null;
       ws.onmessage = async (evt) => {
         if (evt.data instanceof Blob) {
-          if (prevBlobUrl) {
-            URL.revokeObjectURL(prevBlobUrl);
-          }
+          if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
           prevBlobUrl = URL.createObjectURL(evt.data);
           screenView.src = prevBlobUrl;
-          screenStatus.innerText = "LIVE (15 FPS)";
-          screenStatus.style.color = "#38bdf8";
-          statusDot.className = "dot connected";
+          statusDot.className = "status-dot connected";
+          statusTag.textContent = "Active";
+          statusTag.style.color = "var(--accent)";
         } else {
           try {
             const data = JSON.parse(evt.data);
+
             if (data.type === "AUTH_SUCCESS") {
               if (data.token) {
                 activeToken = data.token;
                 localStorage.setItem('nexus_remote_token', data.token);
               }
-              pinModal.style.display = "none";
-              screenStatus.innerText = "AUTHENTICATED";
-              showToast("Connected to Windows OS Assistant over LAN");
+              if (pinModal) pinModal.style.display = "none";
+              statusTag.textContent = "Active";
+              statusTag.style.color = "var(--accent)";
             } else if (data.type === "AUTH_FAILED") {
-              activeToken = '';
-              localStorage.removeItem('nexus_remote_token');
-              if (window.history.replaceState) {
-                window.history.replaceState({}, document.title, window.location.pathname);
+              if (pinModal) pinModal.style.display = "flex";
+              if (pinError) {
+                pinError.style.display = "block";
+                pinError.textContent = data.message || "Invalid PIN";
               }
-              pinModal.style.display = "flex";
-              if (inputPin) {
-                inputPin.value = "4826";
-                inputPin.focus();
+            } else if (data.type === "agent_thinking") {
+              feedbackText.innerHTML = `🤔 <b>Thinking:</b> "${escapeHtml(data.prompt)}"`;
+              appendMessage('user', escapeHtml(data.prompt));
+            } else if (data.type === "agent_progress") {
+              const tool = data.data?.tool || 'action';
+              const agent = data.data?.agent || 'OS Agent';
+              feedbackText.innerHTML = `⚡ <b>Progress:</b> ${escapeHtml(agent)} running ${escapeHtml(tool)}...`;
+            } else if (data.type === "agent_response") {
+              const content = data.content || "Mission completed.";
+              let snippet = content.replace(/```[\s\S]*?```/g, '').trim();
+              if (snippet.length > 55) snippet = snippet.substring(0, 55) + "...";
+              feedbackText.innerHTML = `🤖 <b>Agent:</b> ${escapeHtml(snippet)}`;
+
+              appendMessage('assistant', formatMarkdown(content), data.documents || []);
+
+              // Neural TTS voice playback
+              if (data.spoken_summary) {
+                speakMobileAudio(data.spoken_summary, data.audio_url);
               }
-              showToast("Pairing failed: " + data.message, false);
+            } else if (data.type === "task_failed") {
+              feedbackText.innerHTML = `❌ <b>Failed:</b> ${escapeHtml(data.error || 'Mission stopped')}`;
+              appendMessage('assistant', `⚠️ ${escapeHtml(data.error || 'Task stopped')}`);
             } else if (data.type === "SEARCH_EXECUTED") {
-              showToast(`Searched web for: "${data.query}"`);
+              feedbackText.innerHTML = `🔍 <b>Web Search:</b> Searched "${escapeHtml(data.query)}" in browser`;
             } else if (data.type === "ACTION_FEEDBACK") {
-              showToast(data.message);
-            } else if (data.type === "TASK_DISPATCHED") {
-              showToast(`Agent mission started: ${data.task_id}`);
-            } else if (data.type === "EMERGENCY_STOPPED") {
-              showToast("🛑 EMERGENCY STOP HALTED ALL ACTIONS", false);
+              feedbackText.innerHTML = `⌨️ <b>PC Input:</b> ${escapeHtml(data.message)}`;
+            } else if (data.type === "emergency_stop_triggered") {
+              setMobileEmergencyStopUI(true);
+            } else if (data.type === "emergency_stop_cleared") {
+              setMobileEmergencyStopUI(false);
             }
           } catch (e) {}
         }
       };
 
       ws.onclose = () => {
-        statusDot.className = "dot";
-        screenStatus.innerText = "DISCONNECTED";
-        screenStatus.style.color = "var(--danger)";
-        if (pinModal.style.display === "none") {
-          showToast("Reconnecting to laptop...", false);
-          reconnectTimer = setTimeout(() => connectWebSocket(), 3000);
+        statusDot.className = "status-dot";
+        statusTag.textContent = "Disconnected";
+        statusTag.style.color = "var(--danger)";
+        if (!pinModal || pinModal.style.display === "none") {
+          reconnectTimer = setTimeout(() => connectWebSocket(), 2500);
         }
       };
     }
 
-    btnPair.addEventListener('click', () => {
-      const pin = (inputPin.value || '4826').trim();
-      showToast(`Connecting with PIN: ${pin}...`);
+    function submitPairingPin() {
+      const pin = (pinInput ? pinInput.value : '4826').trim();
       connectWebSocket(pin);
-    });
-
-    inputPin.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        btnPair.click();
-      }
-    });
+    }
 
     // Auto connect immediately
     connectWebSocket();
 
-    // Touchpad Input Mechanics
-    trackpad.addEventListener('touchstart', (e) => {
-      initialTouchCount = e.touches.length;
-      touchStartTime = Date.now();
-      const t = e.touches[0];
-      touchStartX = lastTouchX = t.clientX;
-      touchStartY = lastTouchY = t.clientY;
-    }, { passive: false });
+    // --- High-Performance Virtual Trackpad (Pointer Events + Touch Fallback) ---
+    let isPointerDragging = false;
+    let pointerStartX = 0, pointerStartY = 0;
+    let lastPointerX = 0, lastPointerY = 0;
+    let pointerStartTime = 0;
 
-    trackpad.addEventListener('touchmove', (e) => {
-      e.preventDefault();
+    pad.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      try { pad.setPointerCapture(e.pointerId); } catch (err) {}
+      isPointerDragging = true;
+      pointerStartX = lastPointerX = e.clientX;
+      pointerStartY = lastPointerY = e.clientY;
+      pointerStartTime = Date.now();
+      pad.classList.add('touch-active');
+    });
+
+    pad.addEventListener('pointermove', (e) => {
+      if (!isPointerDragging) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      if (e.touches.length === 1) {
-        // 1-Finger Cursor Movement
-        const t = e.touches[0];
-        const dx = (t.clientX - lastTouchX) * 1.5;
-        const dy = (t.clientY - lastTouchY) * 1.5;
-        lastTouchX = t.clientX;
-        lastTouchY = t.clientY;
+      const rawDx = e.clientX - lastPointerX;
+      const rawDy = e.clientY - lastPointerY;
+      lastPointerX = e.clientX;
+      lastPointerY = e.clientY;
 
+      const dist = Math.hypot(rawDx, rawDy);
+      const accel = dist > 8 ? 2.2 : 1.6;
+      const dx = rawDx * accel;
+      const dy = rawDy * accel;
+
+      if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
         ws.send(JSON.stringify({ type: "trackpad_move", dx, dy }));
-      } else if (e.touches.length === 2) {
-        // 2-Finger Vertical Scroll
-        const t = e.touches[0];
-        const dy = t.clientY - lastTouchY;
-        lastTouchY = t.clientY;
-        const scrollAmount = (dy > 0 ? -1 : 1) * 2;
-        ws.send(JSON.stringify({ type: "trackpad_scroll", amount: scrollAmount }));
+      }
+    });
+
+    function handlePointerEnd(e) {
+      if (!isPointerDragging) return;
+      isPointerDragging = false;
+      pad.classList.remove('touch-active');
+      try { pad.releasePointerCapture(e.pointerId); } catch (err) {}
+
+      const elapsed = Date.now() - pointerStartTime;
+      const moved = Math.hypot(lastPointerX - pointerStartX, lastPointerY - pointerStartY);
+
+      if (elapsed < 280 && moved < 10) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "click", button: "left" }));
+        }
+      }
+    }
+
+    pad.addEventListener('pointerup', handlePointerEnd);
+    pad.addEventListener('pointercancel', handlePointerEnd);
+
+    // 2-Finger Vertical Scroll
+    let lastTouch2Y = null;
+    pad.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        lastTouch2Y = e.touches[0].clientY;
+      }
+    }, { passive: true });
+
+    pad.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && lastTouch2Y !== null) {
+        e.preventDefault();
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const currentY = e.touches[0].clientY;
+        const dy = currentY - lastTouch2Y;
+        lastTouch2Y = currentY;
+        const scrollAmount = (dy > 0 ? 1 : -1) * 2;
+        ws.send(JSON.stringify({ type: "scroll", amount: scrollAmount, dy: scrollAmount }));
       }
     }, { passive: false });
 
-    trackpad.addEventListener('touchend', (e) => {
-      const elapsed = Date.now() - touchStartTime;
-      const totalMoved = Math.hypot(lastTouchX - touchStartX, lastTouchY - touchStartY);
+    pad.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) lastTouch2Y = null;
+    });
 
-      if (elapsed < 250 && totalMoved < 8) {
-        // Tap gesture
-        if (initialTouchCount === 1) {
-          ws.send(JSON.stringify({ type: "trackpad_click", button: "left" }));
-        } else if (initialTouchCount === 2) {
-          ws.send(JSON.stringify({ type: "trackpad_click", button: "right" }));
-        }
+    // --- Direct Tap on Screen Mirror ---
+    screenView.addEventListener('click', (e) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const rect = screenView.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      if (clickX >= 0 && clickX <= rect.width && clickY >= 0 && clickY <= rect.height) {
+        const scaleX = screenRes.width / rect.width;
+        const scaleY = screenRes.height / rect.height;
+        const targetX = Math.round(clickX * scaleX);
+        const targetY = Math.round(clickY * scaleY);
+        ws.send(JSON.stringify({ type: "mouse_click_coords", x: targetX, y: targetY, button: "left" }));
       }
     });
 
-    // Mouse Buttons
-    btnClickLeft.addEventListener('click', () => {
-      if (ws) ws.send(JSON.stringify({ type: "trackpad_click", button: "left" }));
-    });
+    // --- Mouse Buttons ---
+    function sendClick(button) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "click", button: button, clicks: 1 }));
+      }
+    }
 
-    btnClickRight.addEventListener('click', () => {
-      if (ws) ws.send(JSON.stringify({ type: "trackpad_click", button: "right" }));
-    });
-
-    btnDrag.addEventListener('click', () => {
-      isHoldDragging = !isHoldDragging;
-      if (isHoldDragging) {
-        btnDrag.classList.add('drag-active');
-        btnDrag.innerText = "Dragging (Tap to Release)";
-        if (ws) ws.send(JSON.stringify({ type: "trackpad_mouse_down", button: "left" }));
+    function toggleDragLock() {
+      dragLocked = !dragLocked;
+      const btn = document.getElementById('btn-drag-lock');
+      if (dragLocked) {
+        btn.classList.add('holding');
+        btn.innerHTML = "✊ Dragging...";
+        if (ws) ws.send(JSON.stringify({ type: "mouse_down", button: "left" }));
       } else {
-        btnDrag.classList.remove('drag-active');
-        btnDrag.innerText = "Hold Drag";
-        if (ws) ws.send(JSON.stringify({ type: "trackpad_mouse_up", button: "left" }));
+        btn.classList.remove('holding');
+        btn.innerHTML = "✋ Hold Drag";
+        if (ws) ws.send(JSON.stringify({ type: "mouse_up", button: "left" }));
       }
-    });
+    }
 
-    // Browser Actions Bar (Web App Control)
-    document.querySelectorAll('[data-browser]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const action = btn.getAttribute('data-browser');
-        if (ws && action) {
-          ws.send(JSON.stringify({ type: "browser_action", action }));
-          showToast(`Browser command: ${action}`);
+    function sendKey(key) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "press", key: key }));
+      }
+    }
+
+    function sendHotkey(keys) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "hotkey", keys: keys }));
+      }
+    }
+
+    function promptDirectType() {
+      const txt = prompt("Type text to send to active PC window:");
+      if (txt && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "type_and_enter", text: txt }));
+      }
+    }
+
+    function refreshScreenInstant() {
+      fetch(`${API_BASE}/api/screenshot`).then(r => r.blob()).then(b => {
+        if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
+        prevBlobUrl = URL.createObjectURL(b);
+        screenView.src = prevBlobUrl;
+      }).catch(() => {});
+    }
+
+    // --- Emergency Stop ---
+    function toggleEmergencyStopMobile() {
+      if (mobileEmergencyStopped) {
+        clearEmergencyStopMobile();
+      } else {
+        if (!confirm("🛑 Activate Emergency Stop? Halts all running agents.")) return;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "emergency_stop" }));
         }
-      });
-    });
+        setMobileEmergencyStopUI(true);
+      }
+    }
 
-    // Windows Quick Keys Bar
-    document.querySelectorAll('[data-key], [data-hotkey]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const key = btn.getAttribute('data-key');
-        const hotkey = btn.getAttribute('data-hotkey');
-        if (ws && key) {
-          ws.send(JSON.stringify({ type: "press_key", key }));
-          showToast(`Key pressed: ${key}`);
-        } else if (ws && hotkey) {
-          ws.send(JSON.stringify({ type: "hotkey", keys: hotkey.split(',') }));
-          showToast(`Hotkey: ${hotkey.replace(',', '+')}`);
+    function clearEmergencyStopMobile() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "clear_emergency_stop" }));
+      }
+      setMobileEmergencyStopUI(false);
+    }
+
+    function setMobileEmergencyStopUI(stopped) {
+      mobileEmergencyStopped = stopped;
+      if (stopped) {
+        if (mobileEmergencyBanner) mobileEmergencyBanner.style.display = "block";
+        if (mobileStopBtn) {
+          mobileStopBtn.classList.add('active-stop');
+          mobileStopBtn.textContent = "⚠️ RESUME";
         }
-      });
-    });
-
-    // Emergency Stop
-    btnStop.addEventListener('click', () => {
-      if (ws) ws.send(JSON.stringify({ type: "emergency_stop" }));
-      showToast("🛑 EMERGENCY STOP TRANSMITTED", false);
-    });
-
-    // Action 1: Instant Web Search (Direct into web application / Google)
-    function triggerWebSearch() {
-      const text = cmdText.value.trim();
-      if (!text || !ws) return;
-      showToast(`Searching web application for '${text}'...`);
-      ws.send(JSON.stringify({ type: "web_search", query: text }));
-      cmdText.value = '';
+      } else {
+        if (mobileEmergencyBanner) mobileEmergencyBanner.style.display = "none";
+        if (mobileStopBtn) {
+          mobileStopBtn.classList.remove('active-stop');
+          mobileStopBtn.textContent = "🛑 STOP";
+        }
+      }
     }
 
-    // Action 2: Direct Type & Enter into whatever active field is focused on PC
-    function triggerTypeAndEnter() {
-      const text = cmdText.value.trim();
-      if (!text || !ws) return;
-      showToast(`Typing & submitting text into PC...`);
-      ws.send(JSON.stringify({ type: "type_and_enter", text: text }));
-      cmdText.value = '';
+    // --- Action Dispatcher: Prompt / Search / Type ---
+    function sendAction() {
+      const text = promptInput.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      promptInput.value = '';
+
+      if (activeMode === 'search') {
+        feedbackText.innerHTML = `🔍 <b>Searching:</b> "${escapeHtml(text)}"`;
+        ws.send(JSON.stringify({ type: "web_search", query: text }));
+      } else if (activeMode === 'type') {
+        feedbackText.innerHTML = `⌨️ <b>Typing into PC:</b> "${escapeHtml(text)}"`;
+        ws.send(JSON.stringify({ type: "type_and_enter", text: text }));
+      } else {
+        // Default: Full Multi-Agent Prompt
+        feedbackText.innerHTML = `🤔 <b>Processing:</b> "${escapeHtml(text)}"`;
+        ws.send(JSON.stringify({ type: "prompt", text: text }));
+      }
     }
 
-    // Action 3: Autonomous Agent Mission
-    function triggerAgentMission() {
-      const text = cmdText.value.trim();
-      if (!text || !ws) return;
-      showToast(`Dispatching agent mission...`);
-      ws.send(JSON.stringify({ type: "user_prompt", prompt: text }));
-      cmdText.value = '';
-    }
-
-    btnSearchWeb.addEventListener('click', triggerWebSearch);
-    btnTypeEnter.addEventListener('click', triggerTypeAndEnter);
-    btnSendAgent.addEventListener('click', triggerAgentMission);
-
-    // If Enter pressed on mobile keyboard in input: Default to Instant Web Search!
-    cmdText.addEventListener('keydown', (e) => {
+    promptInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        triggerWebSearch();
+        sendAction();
       }
     });
 
-    // Speech-To-Text fallback for phone
+    // --- Speech-to-Text Voice Input ---
+    let recognizer = null;
+    let isListening = false;
+    const btnVoice = document.getElementById('btn-voice');
+
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognizer = new SpeechRec();
+      recognizer = new SpeechRec();
       recognizer.continuous = false;
+      recognizer.interimResults = false;
 
-      let micActive = false;
-      btnMic.addEventListener('click', () => {
-        if (micActive) {
-          recognizer.stop();
-          btnMic.classList.remove('active');
-          micActive = false;
-        } else {
+      recognizer.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        promptInput.value = transcript;
+        stopVoiceListening();
+        sendAction();
+      };
+
+      recognizer.onerror = () => stopVoiceListening();
+      recognizer.onend = () => stopVoiceListening();
+    }
+
+    function toggleVoiceInput() {
+      if (!recognizer) {
+        alert("Speech recognition is not supported in this mobile browser.");
+        return;
+      }
+      if (isListening) {
+        recognizer.stop();
+        stopVoiceListening();
+      } else {
+        try {
           recognizer.start();
-          btnMic.classList.add('active');
-          micActive = true;
-          showToast("Listening... speak your search or command");
+          isListening = true;
+          if (btnVoice) btnVoice.classList.add('listening');
+          feedbackText.innerHTML = `🎙️ <b>Listening...</b> speak instruction now`;
+        } catch (e) {
+          stopVoiceListening();
         }
-      });
+      }
+    }
 
-      recognizer.onresult = (evt) => {
-        const text = evt.results[0][0].transcript;
-        cmdText.value = text;
-        btnMic.classList.remove('active');
-        micActive = false;
-        showToast(`Heard: "${text}"`);
-        // Immediately search in web application!
-        triggerWebSearch();
-      };
+    function stopVoiceListening() {
+      isListening = false;
+      if (btnVoice) btnVoice.classList.remove('listening');
+    }
 
-      recognizer.onerror = () => {
-        btnMic.classList.remove('active');
-        micActive = false;
-        showToast("Mic cancelled", false);
-      };
+    // --- TTS Audio Output ---
+    let currentAudio = null;
+    function toggleMobileTts() {
+      mobileTtsEnabled = !mobileTtsEnabled;
+      localStorage.setItem('os_agent_mobile_tts', mobileTtsEnabled ? 'true' : 'false');
+      if (btnMobileTts) {
+        btnMobileTts.classList.toggle('muted', !mobileTtsEnabled);
+        btnMobileTts.textContent = mobileTtsEnabled ? '🔊' : '🔇';
+      }
+      if (!mobileTtsEnabled && currentAudio) {
+        try { currentAudio.pause(); } catch(e) {}
+      }
+    }
+
+    function speakMobileAudio(text, audioUrl) {
+      if (!mobileTtsEnabled || !text) return;
+      if (currentAudio) {
+        try { currentAudio.pause(); } catch(e) {}
+      }
+
+      if (audioUrl) {
+        fetch(`${API_BASE}/api/speech/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text })
+        }).then(r => r.blob()).then(blob => {
+          const u = URL.createObjectURL(blob);
+          currentAudio = new Audio(u);
+          currentAudio.play().catch(() => speakFallback(text));
+        }).catch(() => speakFallback(text));
+      } else {
+        speakFallback(text);
+      }
+    }
+
+    function speakFallback(text) {
+      if (!window.speechSynthesis) return;
+      try {
+        const clean = text.replace(/[*_#`[\]()]/g, ' ').substring(0, 250);
+        const ut = new SpeechSynthesisUtterance(clean);
+        window.speechSynthesis.speak(ut);
+      } catch(e) {}
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatMarkdown(text) {
+      if (!text) return '';
+      let escaped = escapeHtml(text);
+      escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      escaped = escaped.replace(/\*(.*?)\*/g, '<i>$1</i>');
+      escaped = escaped.replace(/`([^`]+)`/g, '<code style="background:#111;padding:1px 4px;border-radius:3px;">$1</code>');
+      escaped = escaped.replace(/\n/g, '<br>');
+      return escaped;
     }
   </script>
 </body>

@@ -41,10 +41,10 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
     # Selected Models
-    # Primary: gemini-2.0-flash (Sub-second speed, 1M token context, native multimodal vision, 100% free)
-    # Fallback: llama-3.3-70b-versatile on Groq (300+ tok/s)
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-2.0-flash")
-    LLM_VISION_MODEL: str = os.getenv("LLM_VISION_MODEL", "gemini-2.0-flash")
+    # Primary: gemini-3.5-flash (Sub-second speed, 1M token context, native multimodal vision, 100% free)
+    # Fallback: gemini-3-flash-preview, gemini-3.5-flash-lite, or Groq llama-3.3-70b-versatile
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.5-flash")
+    LLM_VISION_MODEL: str = os.getenv("LLM_VISION_MODEL", "gemini-3.5-flash")
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "")
 
     # Security & Mobile LAN Pairing
