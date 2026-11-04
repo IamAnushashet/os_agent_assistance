@@ -297,10 +297,12 @@ def view_document_in_tab(doc_id: Optional[str] = None, path: Optional[str] = Non
 
 
 @app.post("/api/documents/open")
-def open_document(req: Dict[str, str]):
+def open_document(req: Dict[str, Any]):
     """Opens a document in its default Windows desktop application using native ShellExecute / os.startfile."""
-    path_str = req.get("path")
-    doc_id = req.get("doc_id")
+    path_str = str(req.get("path") or "").strip()
+    doc_id = str(req.get("doc_id") or "").strip()
+    filename = str(req.get("filename") or "").strip()
+
     if doc_id:
         doc = db_get_doc(doc_id)
         if doc and doc.get("file_path"):
@@ -313,14 +315,19 @@ def open_document(req: Dict[str, str]):
                 path_str = str(f.resolve())
                 break
 
-    if not path_str and req.get("filename"):
+    if not path_str and filename:
         for f in OUTPUT_DOCS_DIR.glob("*"):
-            if f.name == req["filename"]:
+            if f.name.lower() == filename.lower() or filename.lower() in f.name.lower():
                 path_str = str(f.resolve())
                 break
 
     if not path_str:
-        raise HTTPException(status_code=400, detail="Missing path or doc_id")
+        # Check most recent document in OUTPUT_DOCS_DIR
+        docs = sorted(OUTPUT_DOCS_DIR.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if docs:
+            path_str = str(docs[0].resolve())
+        else:
+            raise HTTPException(status_code=400, detail="No document path or doc_id specified")
 
     p = Path(path_str).resolve()
     if not p.exists():
@@ -344,7 +351,7 @@ def open_document(req: Dict[str, str]):
 
 
 @app.post("/api/documents/reveal")
-def reveal_document_in_explorer(req: Dict[str, str]):
+def reveal_document_in_explorer(req: Dict[str, Any]):
     """Reveals the document in Windows File Explorer with the file highlighted."""
     path_str = req.get("path")
     doc_id = req.get("doc_id")

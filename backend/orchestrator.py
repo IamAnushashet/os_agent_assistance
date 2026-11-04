@@ -384,6 +384,74 @@ class MultiAgentOrchestrator:
                         )
                     elif msg:
                         summary_parts.append(msg)
+
+                elif "recent_files" in res or tool_name == "file_get_recent":
+                    r_files = res.get("recent_files", [])
+                    sort_by = res.get("sort_by", "date")
+                    if r_files:
+                        lines = [f"### 📁 Recent Files ({sort_by.title()} Sort)\n"]
+                        lines.append("| File Name | Size | Last Modified |")
+                        lines.append("|:---|:---|:---|")
+                        for rf in r_files:
+                            lines.append(f"| `{rf.get('name')}` | {rf.get('size_kb')} KB | {rf.get('modified_str')} |")
+                        interactive_prompt = res.get("interactive_prompt", "Would you like me to open any of these files for you?")
+                        lines.append(f"\n*{interactive_prompt}*")
+                        summary_parts.append("\n".join(lines))
+                    elif msg:
+                        summary_parts.append(msg)
+
+                elif "tabs" in res or tool_name == "browser_list_tabs":
+                    tabs = res.get("tabs", [])
+                    if tabs:
+                        t_lines = [f"### 🌐 Active Browser Tabs ({len(tabs)} open)\n"]
+                        for idx, tab in enumerate(tabs, 1):
+                            t_title = tab.get("title") or "Untitled Tab"
+                            t_url = tab.get("url") or ""
+                            t_lines.append(f"{idx}. **{t_title}**\n   `{t_url}`")
+                        summary_parts.append("\n".join(t_lines))
+                    elif msg:
+                        summary_parts.append(msg)
+
+                elif "text" in res and tool_name in ["file_extract_text", "browser_extract_text"]:
+                    extracted = res.get("text", "").strip()
+                    doc_fn = Path(params.get("file_path", "")).name or "Extracted Document"
+                    if extracted:
+                        summary_parts.append(f"### 📄 Extracted Content ({doc_fn})\n\n{extracted}")
+                    elif msg:
+                        summary_parts.append(msg)
+
+                elif tool_name == "system_check_battery" or ("percent" in res and "power_plugged" in res):
+                    pct = res.get("percent")
+                    plugged = res.get("power_plugged")
+                    status_lbl = "Plugged in / Charging" if plugged else "Discharging on Battery"
+                    secs = res.get("seconds_left")
+                    time_rem = f", ~{round(secs / 60)} minutes remaining" if secs and secs > 0 else ""
+                    summary_parts.append(f"🔋 **Battery Status**: {pct}% ({status_lbl}{time_rem})")
+
+                elif "processes" in res or tool_name == "system_list_processes":
+                    procs = res.get("processes", [])
+                    if procs:
+                        p_lines = ["### ⚙️ Top Active Processes\n", "| Process Name | PID | CPU % | RAM % |", "|:---|:---|:---|:---|"]
+                        for pr in procs:
+                            p_lines.append(f"| `{pr.get('name')}` | {pr.get('pid')} | {pr.get('cpu_pct')}% | {pr.get('memory_pct')}% |")
+                        summary_parts.append("\n".join(p_lines))
+                    elif msg:
+                        summary_parts.append(msg)
+
+                elif "cpu" in res and "memory" in res and tool_name == "system_telemetry":
+                    c_pct = res.get("cpu", {}).get("percent")
+                    m = res.get("memory", {})
+                    telem_str = f"💻 **System Telemetry**: CPU: {c_pct}% | RAM: {m.get('used_gb')}GB / {m.get('total_gb')}GB ({m.get('percent')}%)"
+                    batt = res.get("battery")
+                    if batt:
+                        b_status = "Charging" if batt.get("power_plugged") else "Discharging"
+                        telem_str += f" | Battery: {batt.get('percent')}% ({b_status})"
+                    summary_parts.append(telem_str)
+
+                elif tool_name == "system_run_command" and res.get("stdout"):
+                    out = res.get("stdout", "").strip()
+                    summary_parts.append(f"**Command Output:**\n```powershell\n{out}\n```")
+
                 elif msg:
                     summary_parts.append(msg)
 

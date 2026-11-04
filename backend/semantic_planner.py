@@ -515,8 +515,99 @@ if __name__ == "__main__":
                 ))
                 return SemanticPlan(goal=f"Export generated code to {fn}", strategy="Document Generation with Context", steps=steps)
 
-        # Case 0-Pre: File / Folder Conversion or Attached File Action
-        if any(w in p_lower for w in ["convert", "conversion", "transform"]) or (("to word" in p_lower or "to excel" in p_lower or "to ppt" in p_lower or "to pdf" in p_lower) and ("pdf" in p_lower or "file" in p_lower or "folder" in p_lower or "attached" in p_lower)) or "[attached file:" in p_lower:
+        # Case 0-Battery: Query Battery Status & Laptop Power
+        if any(w in p_lower for w in ["battery", "charge", "battery percent", "battery percentage", "battery status", "laptop battery", "power status"]):
+            tool = tool_registry.get("system_check_battery") or tool_registry.get("system_telemetry")
+            steps.append(PlanStep(
+                step_number=1,
+                title="Check laptop battery and power status",
+                agent=tool.agent,
+                tool_name=tool.name,
+                params={},
+                category=tool.category,
+                risk_level=tool.risk_level,
+                reason="Query hardware battery metrics",
+                expected_outcome="Battery percentage and charging state verified"
+            ))
+            return SemanticPlan(goal="Check battery status", strategy="Hardware Telemetry Query", steps=steps)
+
+        # Case 0-Tabs: Check Running Browser Tabs
+        if any(w in p_lower for w in ["running tabs", "open tabs", "browser tabs", "check tabs", "list tabs", "what tabs"]):
+            tool = tool_registry.get("browser_list_tabs")
+            if tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title="List all open tabs across active browser sessions",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason="Inspect active Chrome/Edge browser window tabs",
+                    expected_outcome="Active browser tabs listed"
+                ))
+                return SemanticPlan(goal="Check open browser tabs", strategy="Browser Inspection", steps=steps)
+
+        # Case 0-RecentFiles: List and Sort Recent Files
+        if any(w in p_lower for w in ["recent files", "latest files", "recently modified", "last files", "show my files", "my files", "recent documents"]):
+            sort_by = "date"
+            if "by name" in p_lower or "name" in p_lower:
+                sort_by = "name"
+            elif "by size" in p_lower or "size" in p_lower:
+                sort_by = "size"
+            tool = tool_registry.get("file_get_recent")
+            if tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"List recent files sorted by {sort_by}",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"limit": 10, "sort_by": sort_by},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason="Retrieve recently modified or created files",
+                    expected_outcome="List of recent files returned with open prompt"
+                ))
+                return SemanticPlan(goal="List recent files", strategy="File Discovery", steps=steps)
+
+        # Case 0-Processes: List Top Running Processes
+        if any(w in p_lower for w in ["top processes", "running processes", "process list", "what is running"]):
+            tool = tool_registry.get("system_list_processes")
+            if tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title="List top active system processes",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"limit": 10},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason="Query system process table for active tasks",
+                    expected_outcome="Top processes sorted by resource consumption"
+                ))
+                return SemanticPlan(goal="List active system processes", strategy="Process Telemetry", steps=steps)
+
+        # Case 0-AttachedSummary: Summarize Attached Document
+        attach_match = re.search(r"\[Attached file:\s*([^\]]+)\]", prompt, flags=re.IGNORECASE)
+        if attach_match and not any(w in p_lower for w in ["convert", "conversion", "transform", "to word", "to excel", "to ppt", "to pdf"]):
+            source_path = attach_match.group(1).strip()
+            tool = tool_registry.get("file_extract_text")
+            if tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"Extract text from attached document '{source_path}'",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"file_path": source_path},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason=f"Extract document text to analyze and summarize '{source_path}'",
+                    expected_outcome=f"Document text and tables extracted for summarization"
+                ))
+                return SemanticPlan(goal=f"Extract and summarize attached document {source_path}", strategy="Document Content Summarization", steps=steps)
+
+        # Case 0-Pre: File / Folder Conversion
+        if any(w in p_lower for w in ["convert", "conversion", "transform"]) or (("to word" in p_lower or "to excel" in p_lower or "to ppt" in p_lower or "to pdf" in p_lower) and ("pdf" in p_lower or "file" in p_lower or "folder" in p_lower or "attached" in p_lower)):
             target_fmt = "docx"
             if "excel" in p_lower or "xlsx" in p_lower or "sheet" in p_lower:
                 target_fmt = "xlsx"

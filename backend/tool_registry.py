@@ -369,6 +369,20 @@ class ToolRegistry:
             completion_criterion="Document text extracted."
         ))
 
+        self.register(ToolDefinition(
+            name="file_get_recent",
+            agent="File Agent",
+            description="Lists recent files with sorting by date, name, or size across workspace and generated documents.",
+            parameters={
+                "limit": {"type": "integer", "default": 10},
+                "sort_by": {"type": "string", "default": "date", "description": "Sort order: date, name, or size"}
+            },
+            category=ActionCategory.SAFE_READ.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.get_recent_files,
+            completion_criterion="Recent files listed."
+        ))
+
         # ----------------- SYSTEM AGENT TOOLS -----------------
         self.register(ToolDefinition(
             name="system_telemetry",
@@ -456,6 +470,33 @@ class ToolRegistry:
             risk_level=RiskLevel.HIGH.value,
             handler=system_agent.run_command,
             completion_criterion="Command exit code and stdout captured."
+        ))
+
+        self.register(ToolDefinition(
+            name="system_check_battery",
+            agent="System Agent",
+            description="Checks laptop battery percentage, power connection, and charging status.",
+            parameters={},
+            category=ActionCategory.SAFE_READ.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=system_agent.check_battery,
+            completion_criterion="Battery status returned."
+        ))
+
+        self.register(ToolDefinition(
+            name="system_mouse_click",
+            agent="System Agent",
+            description="Performs mouse click at coordinates (x, y) on the Windows desktop.",
+            parameters={
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "button": {"type": "string", "default": "left"},
+                "double_click": {"type": "boolean", "default": False}
+            },
+            category=ActionCategory.SYSTEM_COMMAND.value,
+            risk_level=RiskLevel.MEDIUM.value,
+            handler=system_agent.mouse_click,
+            completion_criterion="Mouse click performed."
         ))
 
         # ----------------- VISION AGENT TOOLS -----------------

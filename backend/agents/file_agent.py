@@ -194,7 +194,7 @@ class FileAgent:
             return {"success": False, "error": str(e)}
 
     def open_file(self, path: str) -> Dict[str, Any]:
-        """Opens file in default Windows desktop application."""
+        """Opens file in default Windows desktop application with smart candidate resolution."""
         try:
             # Handle ordinal references (e.g. "the second one")
             if "second" in path.lower() and len(self.last_search_results) >= 2:
@@ -204,11 +204,109 @@ class FileAgent:
             else:
                 p = self._resolve_safe_path(path)
 
+            # If exact path does not exist, resolve against candidate folders (generated_documents, downloads, documents)
             if not p.exists():
-                return {"success": False, "error": f"Path not found: {path}"}
+                fname = Path(path).name.lower()
+                clean_name = fname.replace(" ", "_")
+                cands = [
+                    self.default_root / "generated_documents" / Path(path).name,
+                    self.default_root / "generated_documents" / clean_name,
+                    self.default_root / Path(path).name,
+                    self.default_root / clean_name,
+                    Path.home() / "Downloads" / Path(path).name,
+                    Path.home() / "Documents" / Path(path).name
+                ]
+                # Also search case-insensitively in generated_documents
+                gen_dir = self.default_root / "generated_documents"
+                if gen_dir.exists():
+                    for f in gen_dir.iterdir():
+                        if f.is_file() and (f.name.lower() == fname or f.name.lower() == clean_name or f.stem.lower() in fname or fname in f.name.lower()):
+                            cands.append(f)
+
+                # Check database records
+                try:
+                    from db import list_generated_documents
+                    for doc in list_generated_documents(limit=50):
+                        dp = Path(doc.get("file_path", ""))
+                        if dp.name.lower() == fname or dp.name.lower() == clean_name or fname in dp.name.lower():
+                            if dp.exists():
+                                cands.append(dp)
+                except Exception:
+                    pass
+
+                found = None
+                for c in cands:
+                    if c.exists() and c.is_file():
+                        found = c
+                        break
+
+                if found:
+                    p = found
+                else:
+                    return {"success": False, "error": f"Path not found: {path}"}
 
             os.startfile(str(p))
             return {"success": True, "path": str(p), "message": f"Opened '{p.name}' in default Windows application."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_recent_files(self, limit: int = 10, sort_by: str = "date") -> Dict[str, Any]:
+        """Lists recent files with sorting by date, name, or size."""
+        try:
+            search_dirs = [
+                self.default_root,
+                self.default_root / "generated_documents",
+                self.default_root / "scratch",
+                Path.home() / "Downloads"
+            ]
+            exclude_names = {".git", "__pycache__", ".venv", "node_modules", ".file_backups", ".system_generated"}
+            
+            seen_paths = set()
+            file_items = []
+
+            for sdir in search_dirs:
+                if not sdir.exists():
+                    continue
+                try:
+                    for f in sdir.iterdir():
+                        if f.is_file() and f.name not in exclude_names and not f.name.startswith("."):
+                            res_p = str(f.resolve())
+                            if res_p in seen_paths:
+                                continue
+                            seen_paths.add(res_p)
+                            stat = f.stat()
+                            file_items.append({
+                                "name": f.name,
+                                "path": res_p,
+                                "size_bytes": stat.st_size,
+                                "size_kb": round(stat.st_size / 1024, 1),
+                                "modified_ts": stat.st_mtime,
+                                "modified_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                                "extension": f.suffix.lstrip(".").lower()
+                            })
+                except Exception:
+                    pass
+
+            sort_mode = sort_by.lower()
+            if sort_mode == "name":
+                file_items.sort(key=lambda x: x["name"].lower())
+            elif sort_mode == "size":
+                file_items.sort(key=lambda x: x["size_bytes"], reverse=True)
+            else:  # default date
+                file_items.sort(key=lambda x: x["modified_ts"], reverse=True)
+
+            limited = file_items[:limit]
+            self.last_search_results = limited
+
+            return {
+                "success": True,
+                "total": len(file_items),
+                "count": len(limited),
+                "sort_by": sort_mode,
+                "recent_files": limited,
+                "interactive_prompt": "Would you like me to open any of these files for you?",
+                "message": f"Found {len(file_items)} files (showing top {len(limited)} sorted by {sort_mode})."
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 

@@ -1005,16 +1005,17 @@ function pollTaskStatus(taskId, card) {
       if (!res.ok) return;
       const task = await res.json();
 
-      const idBadge = card.querySelector('.task-id-badge');
+      const liveCard = document.getElementById(`task-card-${taskId}`) || card;
+      const idBadge = liveCard.querySelector('.task-id-badge');
       if (idBadge) idBadge.innerText = `TASK // ${task.id}`;
-      const statusBadge = card.querySelector('.task-status');
+      const statusBadge = liveCard.querySelector('.task-status');
       if (statusBadge && task.status) {
         statusBadge.innerText = task.status;
         statusBadge.className = `task-status ${task.status.toLowerCase()}`;
       }
 
       // Update Steps
-      const stepsContainer = card.querySelector('.steps-container');
+      const stepsContainer = liveCard.querySelector('.steps-container');
       const plan = task.plan || {};
       const steps = plan.steps || [];
 
@@ -1063,10 +1064,10 @@ function pollTaskStatus(taskId, card) {
         activePollTimers.delete(taskId);
 
         // Ensure approval box is cleaned up if lingering
-        const lingeringAppBox = card.querySelector('.approval-box');
+        const lingeringAppBox = liveCard.querySelector('.approval-box');
         if (lingeringAppBox) lingeringAppBox.remove();
 
-        const summaryBox = card.querySelector('.task-summary-box');
+        const summaryBox = liveCard.querySelector('.task-summary-box');
         if (summaryBox) {
           summaryBox.classList.remove('hidden');
 
@@ -1518,17 +1519,18 @@ function openDocInNewTab(docId, docPath) {
 
 async function openGeneratedDoc(docId, docPath) {
   try {
-    const filename = docPath ? docPath.split(/[\\/]/).pop() : null;
+    const filename = docPath ? docPath.split(/[\\/]/).pop() : "";
     const res = await fetch(`${API_BASE}/api/documents/open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc_id: docId || null, path: docPath || null, filename })
+      body: JSON.stringify({ doc_id: docId || "", path: docPath || "", filename: filename || "" })
     });
     const data = await res.json();
     if (res.ok && data.success) {
       showToast(`🚀 Opened in Windows: ${data.message || 'File launched'}`);
     } else {
-      alert("Could not open file: " + (data.detail || data.error || "File not found on disk."));
+      const errDetail = Array.isArray(data.detail) ? (data.detail[0]?.msg || JSON.stringify(data.detail)) : (typeof data.detail === 'string' ? data.detail : (data.error || "File not found on disk."));
+      alert("Could not open file: " + errDetail);
       await loadDocuments();
     }
   } catch (e) {
@@ -1538,18 +1540,19 @@ async function openGeneratedDoc(docId, docPath) {
 
 async function revealGeneratedDoc(docId, docPath) {
   try {
-    const filename = docPath ? docPath.split(/[\\/]/).pop() : null;
+    const filename = docPath ? docPath.split(/[\\/]/).pop() : "";
     const res = await fetch(`${API_BASE}/api/documents/reveal`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc_id: docId || null, path: docPath || null, filename })
+      body: JSON.stringify({ doc_id: docId || "", path: docPath || "", filename: filename || "" })
     });
     const data = await res.json();
     if (res.ok && data.success) {
       const fileName = data.path ? data.path.split(/[\\/]/).pop() : 'Document';
       showToast(`📁 Highlighted in File Explorer: ${fileName}`);
     } else {
-      alert("Could not reveal file: " + (data.detail || data.error || "File not found."));
+      const errDetail = Array.isArray(data.detail) ? (data.detail[0]?.msg || JSON.stringify(data.detail)) : (typeof data.detail === 'string' ? data.detail : (data.error || "File not found."));
+      alert("Could not reveal file: " + errDetail);
       await loadDocuments();
     }
   } catch (e) {
@@ -2041,6 +2044,28 @@ async function captureAndAnalyzeVision() {
   }
 }
 
+let liveScreenMirrorTimer = null;
+function toggleLiveScreenMirror() {
+  const btn = document.getElementById('btn-stream-preview');
+  if (liveScreenMirrorTimer) {
+    clearInterval(liveScreenMirrorTimer);
+    liveScreenMirrorTimer = null;
+    if (btn) {
+      btn.innerText = '🔴 Live Mirror';
+      btn.style.background = '';
+    }
+    showToast('Live Screen Mirror stopped', 'info');
+  } else {
+    refreshVisionPreview();
+    liveScreenMirrorTimer = setInterval(refreshVisionPreview, 180);
+    if (btn) {
+      btn.innerText = '🟢 Streaming (5 FPS)';
+      btn.style.background = 'rgba(16, 185, 129, 0.25)';
+    }
+    showToast('Live Screen Mirror active (5 FPS)', 'success');
+  }
+}
+
 function refreshVisionPreview() {
   if (visionScreenImg) {
     const selMon = (selectMonitor && selectMonitor.value) ? selectMonitor.value : 'active';
@@ -2307,6 +2332,11 @@ function setupEventListeners() {
   if (selectMonitor) {
     selectMonitor.addEventListener('change', refreshVisionPreview);
     loadMonitors();
+  }
+
+  const btnStreamPreview = document.getElementById('btn-stream-preview');
+  if (btnStreamPreview) {
+    btnStreamPreview.addEventListener('click', toggleLiveScreenMirror);
   }
   makeElementDraggable(floatingHudBar, floatingHudBar.querySelector('.hud-handle'));
   hudBtnClose.addEventListener('click', () => floatingHudBar.classList.add('hidden'));

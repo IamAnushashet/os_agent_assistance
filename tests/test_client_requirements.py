@@ -225,3 +225,101 @@ def test_browser_activity_in_new_tab():
     plan_chrome = semantic_planner._rule_based_fallback("open chrome browser")
     assert len(plan_chrome.steps) >= 1
     assert plan_chrome.steps[0].tool_name == "browser_new_tab"
+
+
+def test_battery_telemetry_tool():
+    """Verify system_check_battery tool and semantic planner routing."""
+    from agents.system_agent import system_agent
+    from semantic_planner import semantic_planner
+
+    res = system_agent.check_battery()
+    assert res["success"] is True
+    assert "percent" in res
+    assert "message" in res
+
+    # Verify planner routing for battery
+    plan = semantic_planner._rule_based_fallback("Check my battery percentage")
+    assert len(plan.steps) == 1
+    assert plan.steps[0].tool_name in ["system_check_battery", "system_telemetry"]
+
+
+def test_recent_files_listing_and_sorting():
+    """Verify file_get_recent tool, sorting, and interactive prompt."""
+    from agents.file_agent import file_agent
+    from semantic_planner import semantic_planner
+
+    # 1. Test by date
+    res_date = file_agent.get_recent_files(limit=5, sort_by="date")
+    assert res_date["success"] is True
+    assert "recent_files" in res_date
+    assert "Would you like me to open any of these files for you?" in res_date["interactive_prompt"]
+
+    # 2. Test by name
+    res_name = file_agent.get_recent_files(limit=5, sort_by="name")
+    assert res_name["success"] is True
+    names = [f["name"].lower() for f in res_name["recent_files"]]
+    assert names == sorted(names)
+
+    # 3. Test planner routing
+    plan = semantic_planner._rule_based_fallback("Show my recent files")
+    assert len(plan.steps) == 1
+    assert plan.steps[0].tool_name == "file_get_recent"
+
+
+def test_permission_ask_every_step_strict_enforcement():
+    """Verify that Ask Every Step mode enforces human approval on every single step."""
+    from permission_engine import permission_engine, ActionCategory
+
+    # In balanced mode, safe read is auto-permitted
+    perm_bal, src_bal = permission_engine.is_action_permitted(
+        task_id="test-strict-task",
+        workspace_root=str(PROJECT_ROOT),
+        category=ActionCategory.SAFE_READ,
+        permission_mode="balanced"
+    )
+    assert perm_bal is True
+    assert src_bal == "SAFE_READ_POLICY"
+
+    # In ask_every_step mode, even safe read requires approval!
+    perm_strict, src_strict = permission_engine.is_action_permitted(
+        task_id="test-strict-task",
+        workspace_root=str(PROJECT_ROOT),
+        category=ActionCategory.SAFE_READ,
+        permission_mode="ask_every_step"
+    )
+    assert perm_strict is False
+    assert src_strict == "STRICT_STEP_APPROVAL_REQUIRED"
+
+
+def test_semantic_planner_attached_file_summarize_not_convert():
+    """Verify attached file with 'summarize' routes to text extraction and not file conversion."""
+    from semantic_planner import semantic_planner
+
+    prompt = "[Attached file: report_q3.pdf] Summarize this document and tell me the main takeaways."
+    plan = semantic_planner._rule_based_fallback(prompt)
+    assert len(plan.steps) == 1
+    assert plan.steps[0].tool_name == "file_extract_text"
+    assert "file_convert_document" != plan.steps[0].tool_name
+
+
+def test_file_agent_candidate_path_resolution(monkeypatch):
+    """Verify open_file candidate resolution in generated_documents and relative filenames."""
+    from agents.file_agent import file_agent
+    opened = []
+    monkeypatch.setattr(os, "startfile", lambda p: opened.append(p))
+
+    # Create dummy file in generated_documents
+    gen_dir = PROJECT_ROOT / "generated_documents"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    test_doc = gen_dir / "monday_presentation.docx"
+    test_doc.write_text("dummy docx content", encoding="utf-8")
+
+    try:
+        # Opening by bare filename should resolve cleanly to generated_documents/monday_presentation.docx
+        res = file_agent.open_file("monday_presentation.docx")
+        assert res["success"] is True
+        assert len(opened) == 1
+        assert "monday_presentation.docx" in opened[0]
+    finally:
+        if test_doc.exists():
+            test_doc.unlink()

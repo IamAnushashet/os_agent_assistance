@@ -91,6 +91,12 @@ class PermissionEngine:
         if self._full_access_grants.get(task_id) or permission_mode == "full_access":
             return True, "FULL_ACCESS_MODE"
 
+        # Check strict human confirmation mode: when ask_every_step is active, prompt for every action step!
+        if permission_mode in ["ask_every_step", "strict"]:
+            if task_id in self._session_grants and category.value in self._session_grants[task_id]:
+                return True, "SESSION_GRANT"
+            return False, "STRICT_STEP_APPROVAL_REQUIRED"
+
         # Low-risk reads and browser navigation are permitted in balanced mode
         if category in [ActionCategory.SAFE_READ, ActionCategory.FILE_READ, ActionCategory.VISION_CAPTURE]:
             return True, "SAFE_READ_POLICY"

@@ -45,7 +45,20 @@ COMMON_APP_MAP = {
     "edge": "msedge.exe",
     "microsoft edge": "msedge.exe",
     "brave": "brave.exe",
-    "settings": "ms-settings:"
+    "settings": "ms-settings:",
+    "clock": "ms-clock:",
+    "alarms": "ms-clock:",
+    "alarms_clock": "ms-clock:",
+    "calendar": "outlookcal:",
+    "mail": "outlookmail:",
+    "powerpoint": "powerpnt.exe",
+    "ppt": "powerpnt.exe",
+    "word": "winword.exe",
+    "ms word": "winword.exe",
+    "excel": "excel.exe",
+    "ms excel": "excel.exe",
+    "snipping tool": "snippingtool.exe",
+    "snip": "snippingtool.exe"
 }
 
 BLOCKED_COMMAND_PATTERNS = [
@@ -172,13 +185,18 @@ class SystemAgent:
         k = app_name.lower().strip()
         exe = COMMON_APP_MAP.get(k, app_name)
         try:
-            # 1. Native Windows ShellExecute: launches GUI and CLI apps in their own standalone window
+            # 1. Native Windows ShellExecute: launches GUI and standalone windows
             try:
                 os.startfile(exe)
             except Exception:
-                # 2. Fallback to subprocess with CREATE_NEW_CONSOLE so console apps never hijack or block the server process
-                creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
-                subprocess.Popen(exe, shell=True, creationflags=creation_flags)
+                # 2. Interactive Console fallback for CLI shells
+                if k in ["cmd", "command prompt", "cmd.exe"]:
+                    subprocess.Popen("start cmd.exe", shell=True)
+                elif k in ["powershell", "powershell.exe", "pwsh", "pwsh.exe"]:
+                    subprocess.Popen("start powershell.exe -NoExit", shell=True)
+                else:
+                    creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
+                    subprocess.Popen(f'start "" "{exe}"', shell=True, creationflags=creation_flags)
 
             time.sleep(0.8)
             return {"success": True, "app": app_name, "executable": exe, "message": f"Launched '{app_name}' successfully."}
@@ -224,6 +242,33 @@ class SystemAgent:
                 time.sleep(0.2)
         controller.type_text(text)
         return {"success": True, "chars_typed": len(text), "message": f"Typed text into active window."}
+
+    def check_battery(self) -> Dict[str, Any]:
+        """Checks laptop battery percentage, power connection, and charging status."""
+        try:
+            batt = psutil.sensors_battery()
+            if not batt:
+                return {"success": True, "has_battery": False, "percent": 100, "power_plugged": True, "message": "No battery detected (Desktop workstation or AC connected)."}
+            status_text = "Plugged in / Charging" if batt.power_plugged else "Discharging on Battery"
+            time_str = f", ~{round(batt.secsleft / 60)} mins remaining" if (batt.secsleft and batt.secsleft > 0) else ""
+            return {
+                "success": True,
+                "has_battery": True,
+                "percent": batt.percent,
+                "power_plugged": batt.power_plugged,
+                "seconds_left": batt.secsleft if batt.secsleft > 0 else None,
+                "message": f"Battery is at {batt.percent}% ({status_text}{time_str})."
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def mouse_click(self, x: int, y: int, button: str = "left", double_click: bool = False) -> Dict[str, Any]:
+        """Performs direct mouse click on desktop coordinates (x, y)."""
+        try:
+            controller.click(x, y, button=button, double_click=double_click)
+            return {"success": True, "x": x, "y": y, "button": button, "message": f"Clicked mouse {button} button at ({x}, {y})."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def run_command(self, command: str, timeout: float = 15.0) -> Dict[str, Any]:
         """Executes validated PowerShell command with safety restrictions."""
