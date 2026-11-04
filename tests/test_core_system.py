@@ -3,6 +3,7 @@ Automated Test Suite for AI-Native Windows OS Assistant.
 Verifies the 4 Specialized Agents, Tool Registry, Permission Engine, and Orchestrator.
 """
 
+import os
 import sys
 from pathlib import Path
 import pytest
@@ -60,6 +61,20 @@ def test_system_agent_telemetry():
     assert "memory" in telem
     assert telem["memory"]["total_gb"] > 0
     assert len(telem["disks"]) > 0
+
+
+def test_system_agent_launch_app(monkeypatch):
+    """Verifies that launching applications uses native standalone window invocation."""
+    started_targets = []
+    monkeypatch.setattr(os, "startfile", lambda target: started_targets.append(target))
+
+    res = system_agent.launch_app("powershell")
+    assert res["success"] is True
+    assert "powershell.exe" in started_targets
+
+    res_notepad = system_agent.launch_app("notepad")
+    assert res_notepad["success"] is True
+    assert "notepad.exe" in started_targets
 
 
 def test_file_agent_safe_paths(tmp_path):

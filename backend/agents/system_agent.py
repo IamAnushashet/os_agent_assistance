@@ -28,10 +28,24 @@ COMMON_APP_MAP = {
     "vs code": "code",
     "vscode": "code",
     "cmd": "cmd.exe",
+    "command prompt": "cmd.exe",
+    "powershell": "powershell.exe",
+    "pwsh": "pwsh.exe",
     "terminal": "wt.exe",
+    "windows terminal": "wt.exe",
     "explorer": "explorer.exe",
+    "file explorer": "explorer.exe",
+    "files": "explorer.exe",
     "paint": "mspaint.exe",
-    "wordpad": "write.exe"
+    "wordpad": "write.exe",
+    "task manager": "taskmgr.exe",
+    "taskmgr": "taskmgr.exe",
+    "chrome": "chrome.exe",
+    "google chrome": "chrome.exe",
+    "edge": "msedge.exe",
+    "microsoft edge": "msedge.exe",
+    "brave": "brave.exe",
+    "settings": "ms-settings:"
 }
 
 BLOCKED_COMMAND_PATTERNS = [
@@ -154,11 +168,18 @@ class SystemAgent:
             return {"success": False, "error": str(e)}
 
     def launch_app(self, app_name: str) -> Dict[str, Any]:
-        """Launches an approved application by name."""
+        """Launches an approved application by name into an independent desktop window."""
         k = app_name.lower().strip()
         exe = COMMON_APP_MAP.get(k, app_name)
         try:
-            subprocess.Popen(exe, shell=True)
+            # 1. Native Windows ShellExecute: launches GUI and CLI apps in their own standalone window
+            try:
+                os.startfile(exe)
+            except Exception:
+                # 2. Fallback to subprocess with CREATE_NEW_CONSOLE so console apps never hijack or block the server process
+                creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
+                subprocess.Popen(exe, shell=True, creationflags=creation_flags)
+
             time.sleep(0.8)
             return {"success": True, "app": app_name, "executable": exe, "message": f"Launched '{app_name}' successfully."}
         except Exception as e:
