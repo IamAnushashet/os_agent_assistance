@@ -8,6 +8,7 @@ const API_BASE = window.location.origin.startsWith('http') ? window.location.ori
 
 let activeTaskId = null;
 let pollTimer = null;
+const activePollTimers = new Map();
 let telemetryTimer = null;
 let remoteSyncTimer = null;
 let isEmergencyStopped = false;
@@ -566,6 +567,7 @@ const btnCaptureVision = document.getElementById('btn-capture-vision');
 const visionScreenImg = document.getElementById('vision-screen-img');
 const visionTextOutput = document.getElementById('vision-text-output');
 const btnRefreshPreview = document.getElementById('btn-refresh-preview');
+const selectMonitor = document.getElementById('select-monitor');
 
 // Floating HUD DOM
 const floatingHudBar = document.getElementById('floating-hud-bar');
@@ -704,6 +706,149 @@ function setupTabs() {
 }
 
 // =========================================================================
+
+// =========================================================================
+// FLOATING HUD ALWAYS-ON-TOP & MULTI-SCREEN CONTROLLER
+// =========================================================================
+function makeElementDraggable(element, handle) {
+  if (!element || !handle) return;
+  let posX = 0, posY = 0, initialMouseX = 0, initialMouseY = 0;
+  handle.style.cursor = 'grab';
+  handle.onmousedown = function(e) {
+    e = e || window.event;
+    e.preventDefault();
+    handle.style.cursor = 'grabbing';
+    initialMouseX = e.clientX;
+    initialMouseY = e.clientY;
+    document.onmouseup = function() {
+      handle.style.cursor = 'grab';
+      document.onmouseup = null;
+      document.onmousemove = null;
+    };
+    document.onmousemove = function(e) {
+      e = e || window.event;
+      e.preventDefault();
+      posX = initialMouseX - e.clientX;
+      posY = initialMouseY - e.clientY;
+      initialMouseX = e.clientX;
+      initialMouseY = e.clientY;
+      element.style.top = (element.offsetTop - posY) + 'px';
+      element.style.left = (element.offsetLeft - posX) + 'px';
+      element.style.transform = 'none';
+    };
+  };
+}
+
+function openFloatingHudWindow() {
+  // If Document Picture-in-Picture is supported (Chrome 116+, Edge 116+)
+  // it provides a REAL native Always-On-Top floating window across all screens!
+  if ('documentPictureInPicture' in window) {
+    window.documentPictureInPicture.requestWindow({
+      width: 580,
+      height: 125
+    }).then(pipWin => {
+      [...document.styleSheets].forEach(s => {
+        try {
+          const st = document.createElement('style');
+          st.textContent = [...s.cssRules].map(r => r.cssText).join('');
+          pipWin.document.head.appendChild(st);
+        } catch (e) {}
+      });
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap';
+      pipWin.document.head.appendChild(link);
+
+      const hudClone = floatingHudBar.cloneNode(true);
+      hudClone.classList.remove('hidden');
+      hudClone.style.position = 'static';
+      hudClone.style.transform = 'none';
+      hudClone.style.boxShadow = 'none';
+      hudClone.style.width = '100%';
+      pipWin.document.body.style.margin = '0';
+      pipWin.document.body.style.background = '#090d16';
+      pipWin.document.body.style.display = 'flex';
+      pipWin.document.body.style.alignItems = 'center';
+      pipWin.document.body.style.justifyContent = 'center';
+      pipWin.document.body.style.height = '100vh';
+      pipWin.document.body.appendChild(hudClone);
+
+      const pInput = hudClone.querySelector('#hud-input');
+      const pSend = hudClone.querySelector('#hud-btn-send');
+      const pClose = hudClone.querySelector('#hud-btn-close');
+
+      if (pInput) {
+        pInput.focus();
+        pInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const text = pInput.value.trim();
+            if (text) {
+              pInput.value = '';
+              submitPrompt(text);
+              showToast(`HUD Executing: "${text}"`, 'info');
+            }
+          }
+        });
+      }
+      if (pSend && pInput) {
+        pSend.addEventListener('click', () => {
+          const text = pInput.value.trim();
+          if (text) {
+            pInput.value = '';
+            submitPrompt(text);
+            showToast(`HUD Executing: "${text}"`, 'info');
+          }
+        });
+      }
+      if (pClose) {
+        pClose.addEventListener('click', () => pipWin.close());
+      }
+    }).catch(err => {
+      console.warn('Document PiP fallback:', err);
+      openHudPopupWindow();
+    });
+  } else {
+    openHudPopupWindow();
+  }
+}
+
+function openHudPopupWindow() {
+  const left = Math.max(50, (window.screen.width - 600) / 2);
+  const popWin = window.open(
+    '/desktop/hud.html',
+    'NexusFloatingHUD',
+    `width=600,height=135,left=${left},top=60,resizable=yes,scrollbars=no,status=no,toolbar=no`
+  );
+  if (!popWin || popWin.closed || typeof popWin.closed === 'undefined') {
+    floatingHudBar.classList.remove('hidden');
+    showToast('Floating HUD opened in-page (Allow popups for Always-on-Top multi-screen HUD)', 'info');
+  } else {
+    showToast('Floating HUD launched. Drag to any monitor or pin Always-on-Top.', 'success');
+  }
+}
+
+async function loadMonitors() {
+  if (!selectMonitor) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/monitors`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const monitors = data.monitors || [];
+    if (monitors.length > 0) {
+      selectMonitor.innerHTML = '<option value="active">Active Foreground Screen</option>';
+      monitors.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.index;
+        opt.textContent = `${m.label} (${m.width}x${m.height})`;
+        selectMonitor.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.debug('loadMonitors note:', e);
+  }
+}
+
 // 3. CONSOLE & PROMPT EXECUTION
 // =========================================================================
 async function submitPrompt(text) {
@@ -740,6 +885,7 @@ async function submitPrompt(text) {
     });
     const data = await res.json();
     activeTaskId = data.task_id;
+    taskCard.id = `task-card-${activeTaskId}`;
     knownTaskIds.add(activeTaskId);
     pollTaskStatus(activeTaskId, taskCard);
     loadRecentTasks();
@@ -785,6 +931,10 @@ async function syncRemoteTasks() {
       const isRunning = ['RUNNING', 'AWAITING_APPROVAL', 'QUEUED'].includes(t.status);
 
       if (isRunning || isNewSessionTask) {
+        if (document.getElementById(`task-card-${t.id}`)) {
+          knownTaskIds.add(t.id);
+          continue;
+        }
         knownTaskIds.add(t.id);
         activeTaskId = t.id;
 
@@ -838,14 +988,18 @@ function createTaskCard(prompt) {
 }
 
 function pollTaskStatus(taskId, card) {
-  if (pollTimer) clearInterval(pollTimer);
+  // Cancel previous polling for THIS specific task if already running
+  if (activePollTimers.has(taskId)) {
+    clearInterval(activePollTimers.get(taskId));
+    activePollTimers.delete(taskId);
+  }
 
-  pollTimer = setInterval(async () => {
+  const timer = setInterval(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/tasks/${taskId}`);
       if (res.status === 404) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+        clearInterval(timer);
+        activePollTimers.delete(taskId);
         return;
       }
       if (!res.ok) return;
@@ -854,7 +1008,7 @@ function pollTaskStatus(taskId, card) {
       const idBadge = card.querySelector('.task-id-badge');
       if (idBadge) idBadge.innerText = `TASK // ${task.id}`;
       const statusBadge = card.querySelector('.task-status');
-      if (statusBadge) {
+      if (statusBadge && task.status) {
         statusBadge.innerText = task.status;
         statusBadge.className = `task-status ${task.status.toLowerCase()}`;
       }
@@ -900,36 +1054,53 @@ function pollTaskStatus(taskId, card) {
       if (task.status === 'AWAITING_APPROVAL' && task.pending_approval) {
         renderApprovalPrompt(card, task.pending_approval);
       } else if (existingAppBox && task.status !== 'AWAITING_APPROVAL') {
-        // If task transitioned out of approval state, remove the prompt
         existingAppBox.remove();
       }
 
       // Finished States
       if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status)) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+        clearInterval(timer);
+        activePollTimers.delete(taskId);
 
         // Ensure approval box is cleaned up if lingering
         const lingeringAppBox = card.querySelector('.approval-box');
         if (lingeringAppBox) lingeringAppBox.remove();
 
         const summaryBox = card.querySelector('.task-summary-box');
-        summaryBox.classList.remove('hidden');
+        if (summaryBox) {
+          summaryBox.classList.remove('hidden');
 
-        const report = task.completion_report || {};
-        const summaryText = task.error_message 
-          ? `<b style="color:var(--accent-crimson)">Failed:</b> ${escapeHtml(task.error_message)}`
-          : (report.summary || plan.conversational_response || "Task executed and verified on your Windows desktop.");
+          const report = task.completion_report || {};
+          const summaryText = task.error_message 
+            ? `<b style="color:var(--accent-crimson)">Failed:</b> ${escapeHtml(task.error_message)}`
+            : (report.summary || plan.conversational_response || "Task executed and verified on your Windows desktop.");
 
-        const formattedHtml = task.error_message ? summaryText : renderMarkdown(summaryText);
-        summaryBox.innerHTML = `
-          <div class="summary-content">${formattedHtml}</div>
-          <button class="btn-mini-new" style="margin-top:10px;" onclick="playTts(\`${encodeURIComponent(summaryText.replace(/<[^>]*>/g, ''))}\`)">🔊 Listen Voice</button>
-        `;
+          let formattedHtml = summaryText;
+          try {
+            formattedHtml = task.error_message ? summaryText : renderMarkdown(summaryText);
+          } catch (mErr) {
+            console.warn('renderMarkdown error:', mErr);
+            formattedHtml = escapeHtml(summaryText).replace(/\n/g, '<br>');
+          }
+
+          const plainForSpeech = (typeof summaryText === 'string') 
+            ? summaryText.replace(/<[^>]*>/g, '').replace(/[`*#]/g, '')
+            : 'Mission complete';
+
+          summaryBox.innerHTML = `
+            <div class="summary-content">${formattedHtml}</div>
+            <button class="btn-mini-new" style="margin-top:10px;" onclick="playTts(\`${encodeURIComponent(plainForSpeech)}\`)">🔊 Listen Voice</button>
+          `;
+        }
 
         // Check if any document (.pptx or .pdf) was created!
-        checkForCreatedDocument(card, task);
-        loadDocuments();
+        try {
+          checkForCreatedDocument(card, task);
+          loadDocuments();
+        } catch (docErr) {
+          console.warn('checkForCreatedDocument note:', docErr);
+        }
+
         if (typeof chatViewport !== 'undefined' && chatViewport) {
           chatViewport.scrollTop = chatViewport.scrollHeight;
         }
@@ -938,6 +1109,8 @@ function pollTaskStatus(taskId, card) {
       console.error('pollTaskStatus error:', e);
     }
   }, 750);
+
+  activePollTimers.set(taskId, timer);
 }
 
 async function checkForCreatedDocument(card, task) {
@@ -1870,7 +2043,8 @@ async function captureAndAnalyzeVision() {
 
 function refreshVisionPreview() {
   if (visionScreenImg) {
-    visionScreenImg.src = `${API_BASE}/api/screenshot?t=${Date.now()}`;
+    const selMon = (selectMonitor && selectMonitor.value) ? selectMonitor.value : 'active';
+    visionScreenImg.src = `${API_BASE}/api/screenshot?monitor=${selMon}&t=${Date.now()}`;
   }
 }
 
@@ -2129,7 +2303,12 @@ function setupEventListeners() {
   });
 
   // HUD
-  btnToggleHud.addEventListener('click', () => floatingHudBar.classList.toggle('hidden'));
+  btnToggleHud.addEventListener('click', openFloatingHudWindow);
+  if (selectMonitor) {
+    selectMonitor.addEventListener('change', refreshVisionPreview);
+    loadMonitors();
+  }
+  makeElementDraggable(floatingHudBar, floatingHudBar.querySelector('.hud-handle'));
   hudBtnClose.addEventListener('click', () => floatingHudBar.classList.add('hidden'));
   hudBtnSend.addEventListener('click', () => submitPrompt(hudInput.value));
   hudInput.addEventListener('keydown', (e) => {

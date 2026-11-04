@@ -8,7 +8,7 @@ import base64
 import ctypes
 from ctypes import wintypes
 import logging
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict, Any
 from PIL import Image, ImageDraw
 import mss
 
@@ -131,37 +131,98 @@ def draw_cursor_on_image(img: Image.Image, scale: float = 1.0) -> Image.Image:
     return img
 
 
-def capture_screen_pil(scale: float = 1.0, draw_cursor: bool = True) -> Image.Image:
+def get_active_monitor_index() -> int:
+    """Returns index of the monitor currently containing mouse cursor or foreground window."""
+    try:
+        user32 = ctypes.windll.user32
+        cursor = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(cursor))
+        cx, cy = cursor.x, cursor.y
+
+        global _sct_instance
+        if _sct_instance is None:
+            _sct_instance = mss.MSS()
+
+        for idx in range(1, len(_sct_instance.monitors)):
+            m = _sct_instance.monitors[idx]
+            if m["left"] <= cx < m["left"] + m["width"] and m["top"] <= cy < m["top"] + m["height"]:
+                return idx
+    except Exception:
+        pass
+    return 1
+
+
+def list_monitors() -> List[Dict[str, Any]]:
+    """Lists all active physical monitors plus virtual combined multi-monitor desktop."""
+    global _sct_instance
+    try:
+        if _sct_instance is None:
+            _sct_instance = mss.MSS()
+        res = []
+        for idx, m in enumerate(_sct_instance.monitors):
+            label = "All Screens (Combined Desktop)" if idx == 0 else f"Screen {idx}"
+            if m.get("is_primary"):
+                label += " (Primary)"
+            res.append({
+                "index": idx,
+                "label": label,
+                "left": m["left"],
+                "top": m["top"],
+                "width": m["width"],
+                "height": m["height"],
+                "is_primary": bool(m.get("is_primary", False))
+            })
+        return res
+    except Exception:
+        w, h = get_screen_dimensions()
+        return [{"index": 1, "label": "Screen 1 (Primary)", "left": 0, "top": 0, "width": w, "height": h, "is_primary": True}]
+
+
+def capture_screen_pil(
+    scale: float = 1.0,
+    draw_cursor: bool = True,
+    monitor_index: Optional[int] = None
+) -> Image.Image:
     """
-    Captures primary display and renders mouse cursor.
-    Uses interactive desktop attachment to guarantee BitBlt success on Windows.
+    Captures display and renders mouse cursor.
+    Supports specific monitor (1, 2, ...), all monitors combined (0),
+    or auto-detection of the monitor containing active window/cursor.
     """
     global _sct_instance
     ensure_interactive_desktop()
     img = None
+    target_offset = (0, 0)
 
     # Primary capture attempt: MSS
     try:
         if _sct_instance is None:
             _sct_instance = mss.MSS()
-        monitor = _sct_instance.monitors[1] if len(_sct_instance.monitors) > 1 else _sct_instance.monitors[0]
-        sct_img = _sct_instance.grab(monitor)
+
+        # Select target monitor
+        if monitor_index is not None and 0 <= monitor_index < len(_sct_instance.monitors):
+            target_mon = _sct_instance.monitors[monitor_index]
+        else:
+            # Auto-detect active screen
+            active_idx = get_active_monitor_index()
+            if active_idx < len(_sct_instance.monitors):
+                target_mon = _sct_instance.monitors[active_idx]
+            elif len(_sct_instance.monitors) > 1:
+                target_mon = _sct_instance.monitors[1]
+            else:
+                target_mon = _sct_instance.monitors[0]
+
+        target_offset = (target_mon["left"], target_mon["top"])
+        sct_img = _sct_instance.grab(target_mon)
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
     except Exception:
-        # Re-initialize MSS in case display DC was reset
+        # Fallback to PIL ImageGrab if available
         try:
-            _sct_instance = mss.MSS()
-            monitor = _sct_instance.monitors[1] if len(_sct_instance.monitors) > 1 else _sct_instance.monitors[0]
-            sct_img = _sct_instance.grab(monitor)
-            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            from PIL import ImageGrab
+            all_screens = (monitor_index == 0)
+            img = ImageGrab.grab(all_screens=all_screens)
         except Exception:
-            # Fallback to PIL ImageGrab if available
-            try:
-                from PIL import ImageGrab
-                img = ImageGrab.grab()
-            except Exception:
-                w, h = get_screen_dimensions()
-                img = create_fallback_image(w, h)
+            w, h = get_screen_dimensions()
+            img = create_fallback_image(w, h)
 
     if scale != 1.0 and 0.1 <= scale <= 2.0 and img is not None:
         new_w = max(1, int(img.width * scale))
@@ -174,13 +235,18 @@ def capture_screen_pil(scale: float = 1.0, draw_cursor: bool = True) -> Image.Im
     return img
 
 
-def get_screenshot_bytes(scale: float = 0.75, quality: int = 70, draw_cursor: bool = True) -> bytes:
-    img = capture_screen_pil(scale=scale, draw_cursor=draw_cursor)
+def get_screenshot_bytes(
+    scale: float = 0.75,
+    quality: int = 70,
+    draw_cursor: bool = True,
+    monitor_index: Optional[int] = None
+) -> bytes:
+    img = capture_screen_pil(scale=scale, draw_cursor=draw_cursor, monitor_index=monitor_index)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue()
 
 
-def get_screenshot_base64(scale: float = 0.85, quality: int = 80) -> str:
-    raw = get_screenshot_bytes(scale=scale, quality=quality, draw_cursor=True)
+def get_screenshot_base64(scale: float = 0.85, quality: int = 80, monitor_index: Optional[int] = None) -> str:
+    raw = get_screenshot_bytes(scale=scale, quality=quality, draw_cursor=True, monitor_index=monitor_index)
     return base64.b64encode(raw).decode("utf-8")

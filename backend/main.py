@@ -38,7 +38,7 @@ from db import (
 )
 from permission_engine import permission_engine
 from orchestrator import orchestrator, TaskState
-from screen_capture import get_screenshot_bytes, get_screen_dimensions
+from screen_capture import get_screenshot_bytes, get_screen_dimensions, list_monitors
 from input_controller import controller
 from speech_service import speech_service, RECOMMENDED_NEURAL_VOICES
 from llm_gateway import llm_gateway
@@ -236,7 +236,7 @@ def list_generated_documents():
                     pass
 
     # 3. Query DB and clean out any stale/missing records or test temp files
-    docs = db_list_docs(limit=50)
+    docs = db_list_docs(limit=200)
     valid_docs = []
     proj_resolved = PROJECT_ROOT.resolve()
     for d in docs:
@@ -811,9 +811,25 @@ def clear_emergency_stop_endpoint():
 
 # ----------------- SCREEN & SPEECH -----------------
 
+@app.get("/api/monitors")
+def get_monitors_endpoint():
+    """Lists all active physical monitors and the combined multi-screen desktop."""
+    return {"monitors": list_monitors()}
+
+
 @app.get("/api/screenshot")
-def get_screenshot_endpoint(scale: float = 0.75, quality: int = 70):
-    raw = get_screenshot_bytes(scale=scale, quality=quality, draw_cursor=True)
+def get_screenshot_endpoint(
+    scale: float = 0.75,
+    quality: int = 70,
+    monitor: Optional[str] = None
+):
+    mon_idx = None
+    if monitor is not None:
+        if monitor.lower() in ["all", "combined", "0"]:
+            mon_idx = 0
+        elif monitor.isdigit():
+            mon_idx = int(monitor)
+    raw = get_screenshot_bytes(scale=scale, quality=quality, draw_cursor=True, monitor_index=mon_idx)
     return Response(content=raw, media_type="image/jpeg")
 
 
@@ -940,6 +956,8 @@ async def websocket_remote_endpoint(websocket: WebSocket):
             await websocket.close()
             return
 
+        selected_remote_monitor = None
+
         # Background frame streamer task (15 FPS)
         async def frame_streamer():
             while True:
@@ -948,7 +966,8 @@ async def websocket_remote_endpoint(websocket: WebSocket):
                         get_screenshot_bytes,
                         scale=settings.STREAM_SCALE,
                         quality=settings.STREAM_QUALITY,
-                        draw_cursor=True
+                        draw_cursor=True,
+                        monitor_index=selected_remote_monitor
                     )
                     if raw_jpeg:
                         await websocket.send_bytes(raw_jpeg)
@@ -963,6 +982,14 @@ async def websocket_remote_endpoint(websocket: WebSocket):
         # Process incoming trackpad & control events
         while True:
             data = await websocket.receive_json()
+            if data.get("type") == "switch_monitor":
+                m_val = data.get("monitor")
+                if m_val is None or str(m_val).lower() in ["all", "combined", "0"]:
+                    selected_remote_monitor = 0 if m_val is not None else None
+                elif str(m_val).isdigit():
+                    selected_remote_monitor = int(m_val)
+                logger.info(f"Phone Remote switched monitor to: {selected_remote_monitor}")
+                continue
             evt_type = data.get("type", "")
             logger.info(f"Phone Remote control event: {evt_type}")
 

@@ -255,3 +255,22 @@ def test_human_approval_resolution_endpoints():
 
     dec_s, _ = fut_session.result()
     assert dec_s == PermissionDecision.ALLOW_SESSION
+
+
+def test_monitors_and_multi_screen_endpoints():
+    """Validates multi-monitor enumeration and screenshot targeting."""
+    res = client.get("/api/monitors")
+    assert res.status_code == 200
+    data = res.json()
+    assert "monitors" in data
+    assert len(data["monitors"]) >= 1
+    first_mon = data["monitors"][0]
+    assert "index" in first_mon
+    assert "width" in first_mon
+    assert "height" in first_mon
+
+    # Test screenshot with specific monitor index
+    shot_res = client.get(f"/api/screenshot?monitor={first_mon['index']}&scale=0.2")
+    assert shot_res.status_code == 200
+    assert shot_res.headers["content-type"] == "image/jpeg"
+    assert len(shot_res.content) > 100

@@ -490,7 +490,15 @@
               <div class="vision-preview-card">
                 <div class="preview-header">
                   <span>Live Desktop Screen Capture</span>
-                  <button id="btn-refresh-preview" class="btn-mini-new">Refresh</button>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <select id="select-monitor" class="governance-select" style="padding:2px 8px; font-size:11px; height:26px;">
+                      <option value="active">Active Screen</option>
+                      <option value="1">Screen 1 (Primary)</option>
+                      <option value="2">Screen 2</option>
+                      <option value="0">All Screens (Combined)</option>
+                    </select>
+                    <button id="btn-refresh-preview" class="btn-mini-new">Refresh</button>
+                  </div>
                 </div>
                 <img id="vision-screen-img" src="/api/screenshot" alt="Desktop Screenshot">
               </div>

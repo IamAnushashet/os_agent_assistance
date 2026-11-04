@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus OS // Floating Assistant HUD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0d12;
+      --card-bg: #151821;
+      --border: #232838;
+      --accent-blue: #38bdf8;
+      --accent-green: #10b981;
+      --accent-yellow: #f59e0b;
+      --accent-red: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      user-select: none;
+      -webkit-user-select: none;
+      border: 1px solid var(--border);
+    }
+    .hud-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 12px;
+      background: #11141c;
+      border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+      cursor: move;
+    }
+    .hud-brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--accent-blue);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .hud-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+    .btn-pip {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--accent-blue);
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    .btn-pip:hover {
+      background: rgba(56, 189, 248, 0.25);
+    }
+    .hud-main {
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+    .hud-input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 8px;
+      transition: border-color 0.2s;
+    }
+    .hud-input-row:focus-within {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+    #hud-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      padding: 6px 4px;
+    }
+    #hud-input::placeholder {
+      color: #64748b;
+    }
+    .btn-icon {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 6px;
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+    .btn-icon:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .btn-send {
+      background: var(--accent-blue);
+      color: #0b1120;
+      border: none;
+      border-radius: 6px;
+      font-weight: 700;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s;
+    }
+    .btn-send:hover {
+      background: #7dd3fc;
+    }
+    .hud-status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      min-height: 18px;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+    }
+    .pulse-dot.running {
+      background: var(--accent-yellow);
+      box-shadow: 0 0 6px var(--accent-yellow);
+      animation: pulse 1s infinite alternate;
+    }
+    .pulse-dot.failed {
+      background: var(--accent-red);
+      box-shadow: 0 0 6px var(--accent-red);
+    }
+    @keyframes pulse {
+      from { opacity: 0.4; }
+      to { opacity: 1; }
+    }
+    .hud-response-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 360px;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-titlebar">
+    <div class="hud-brand">
+      <span>⚡</span>
+      <span>NEXUS // FLOATING HUD</span>
+    </div>
+    <div class="hud-actions">
+      <button id="btn-pip" class="btn-pip" title="Pin Always-On-Top over other apps">📌 Always-on-Top</button>
+      <button id="btn-main-deck" class="btn-pip" title="Switch to Full Dashboard">🪟 Dashboard</button>
+      <button id="btn-close" class="btn-icon" title="Close HUD">✕</button>
+    </div>
+  </div>
+
+  <div class="hud-main">
+    <div class="hud-input-row">
+      <input type="text" id="hud-input" placeholder="Type instruction (e.g. 'Open Edge and search FastAPI', 'ping')..." autofocus>
+      <button id="btn-mic" class="btn-icon" title="Voice Input (Push to Talk)">🎙️</button>
+      <button id="btn-send" class="btn-send" title="Send Instruction">
+        <span>Send</span>
+        <span>➤</span>
+      </button>
+    </div>
+    <div class="hud-status-bar">
+      <div id="hud-status-pill" class="status-pill">
+        <span id="hud-dot" class="pulse-dot"></span>
+        <span id="hud-status-text">Ready</span>
+      </div>
+      <div id="hud-response" class="hud-response-text">Waiting for prompt...</div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin.startsWith('http') ? window.location.origin : 'http://127.0.0.1:8000';
+    const hudInput = document.getElementById('hud-input');
+    const btnSend = document.getElementById('btn-send');
+    const btnMic = document.getElementById('btn-mic');
+    const btnPip = document.getElementById('btn-pip');
+    const btnMainDeck = document.getElementById('btn-main-deck');
+    const btnClose = document.getElementById('btn-close');
+    const hudDot = document.getElementById('hud-dot');
+    const hudStatusText = document.getElementById('hud-status-text');
+    const hudResponse = document.getElementById('hud-response');
+
+    let isListening = false;
+    let recognition = null;
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRec();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.onstart = () => {
+        isListening = true;
+        btnMic.style.color = '#ef4444';
+        hudStatusText.textContent = "Listening...";
+      };
+      recognition.onresult = (e) => {
+        const text = e.results[0][0].transcript;
+        hudInput.value = text;
+        submitHudPrompt(text);
+      };
+      recognition.onerror = () => {
+        isListening = false;
+        btnMic.style.color = '';
+        hudStatusText.textContent = "Ready";
+      };
+      recognition.onend = () => {
+        isListening = false;
+        btnMic.style.color = '';
+      };
+    }
+
+    btnMic.addEventListener('click', () => {
+      if (!recognition) return alert('Speech recognition not supported in this browser.');
+      if (isListening) recognition.stop();
+      else recognition.start();
+    });
+
+    btnSend.addEventListener('click', () => submitHudPrompt());
+    hudInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitHudPrompt();
+      }
+    });
+
+    btnClose.addEventListener('click', () => window.close());
+    btnMainDeck.addEventListener('click', () => {
+      window.open('/desktop/index.html', '_blank');
+    });
+
+    // Native Document Picture-in-Picture API for 100% Always-On-Top across all screens
+    btnPip.addEventListener('click', async () => {
+      if ('documentPictureInPicture' in window) {
+        try {
+          const pipWin = await window.documentPictureInPicture.requestWindow({
+            width: 580,
+            height: 120
+          });
+          // Copy head style
+          [...document.styleSheets].forEach(s => {
+            try {
+              const st = document.createElement('style');
+              st.textContent = [...s.cssRules].map(r => r.cssText).join('');
+              pipWin.document.head.appendChild(st);
+            } catch (err) {}
+          });
+          pipWin.document.body.appendChild(document.querySelector('.hud-titlebar').cloneNode(true));
+          pipWin.document.body.appendChild(document.querySelector('.hud-main'));
+        } catch (e) {
+          console.warn('PiP note:', e);
+        }
+      } else {
+        alert('Always-on-Top PiP is available in Chrome & Edge browsers.');
+      }
+    });
+
+    async function submitHudPrompt(manualPrompt) {
+      const text = (manualPrompt !== undefined ? manualPrompt : hudInput.value).trim();
+      if (!text) return;
+      hudInput.value = '';
+
+      hudDot.className = "pulse-dot running";
+      hudStatusText.textContent = "Planning...";
+      hudResponse.textContent = `Executing: "${text}"`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: text }],
+            permission_mode: "balanced"
+          })
+        });
+        const data = await res.json();
+        const taskId = data.task_id;
+        pollHudTask(taskId);
+      } catch (err) {
+        hudDot.className = "pulse-dot failed";
+        hudStatusText.textContent = "Error";
+        hudResponse.textContent = `Connection error: ${err.message}`;
+      }
+    }
+
+    function pollHudTask(taskId) {
+      const pollTimer = setInterval(async () => {
+        try {
+          const r = await fetch(`${API_BASE}/api/tasks/${taskId}`);
+          if (!r.ok) return;
+          const t = await r.json();
+
+          if (t.status === 'RUNNING') {
+            hudDot.className = "pulse-dot running";
+            hudStatusText.textContent = "Executing...";
+            const plan = t.plan || {};
+            const curStep = (plan.steps || [])[t.current_step_index || 0];
+            if (curStep) {
+              hudResponse.textContent = `Step ${curStep.step_number}: ${curStep.title}`;
+            }
+          } else if (t.status === 'COMPLETED') {
+            clearInterval(pollTimer);
+            hudDot.className = "pulse-dot";
+            hudStatusText.textContent = "✓ Completed";
+            const report = t.completion_report || {};
+            const summary = report.summary || (t.plan && t.plan.conversational_response) || "Mission executed.";
+            hudResponse.textContent = summary;
+          } else if (['FAILED', 'CANCELLED'].includes(t.status)) {
+            clearInterval(pollTimer);
+            hudDot.className = "pulse-dot failed";
+            hudStatusText.textContent = t.status;
+            hudResponse.textContent = t.error_message || "Task stopped.";
+          }
+        } catch (e) {}
+      }, 750);
+    }
+  </script>
+</body>
+</html>
