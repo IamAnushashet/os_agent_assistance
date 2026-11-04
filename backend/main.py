@@ -7,6 +7,13 @@ import socket
 import asyncio
 import logging
 import os
+import sys
+from pathlib import Path
+
+_backend_dir = Path(__file__).resolve().parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 import psutil
 import subprocess
 import time
@@ -62,15 +69,38 @@ if DESKTOP_DIR.exists():
 
 
 def get_local_ip() -> str:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # 1. Standard UDP probe to external IP
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
-    except Exception:
-        ip = '127.0.0.1'
-    finally:
         s.close()
-    return ip
+        if ip and not ip.startswith('127.'):
+            return ip
+    except Exception:
+        pass
+
+    # 2. Iterate local network adapters via psutil (catches Wi-Fi/Ethernet even on offline or private LAN)
+    try:
+        for iface, addrs in psutil.net_if_addrs().items():
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    addr = a.address
+                    if not addr.startswith('127.') and not addr.startswith('169.254.'):
+                        return addr
+    except Exception:
+        pass
+
+    # 3. Hostname DNS resolution
+    try:
+        host = socket.gethostname()
+        for ip in socket.gethostbyname_ex(host)[2]:
+            if not ip.startswith('127.') and not ip.startswith('169.254.'):
+                return ip
+    except Exception:
+        pass
+
+    return '127.0.0.1'
 
 
 @app.on_event("startup")
@@ -832,14 +862,19 @@ def update_settings_endpoint(req: SettingsUpdateRequest):
 
 @app.get("/remote", response_class=HTMLResponse)
 def get_remote_page():
-    remote_html_path = STATIC_DIR / "remote.html"
-    if remote_html_path.exists():
-        content = remote_html_path.read_text(encoding="utf-8")
-        res = HTMLResponse(content=content)
-        res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-        res.headers["Pragma"] = "no-cache"
-        res.headers["Expires"] = "0"
-        return res
+    candidates = [
+        STATIC_DIR / "remote.html",
+        Path(__file__).resolve().parent / "static" / "remote.html",
+        PROJECT_ROOT / "backend" / "static" / "remote.html"
+    ]
+    for cand in candidates:
+        if cand.exists():
+            content = cand.read_text(encoding="utf-8")
+            res = HTMLResponse(content=content)
+            res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+            res.headers["Pragma"] = "no-cache"
+            res.headers["Expires"] = "0"
+            return res
     return "<h3>Mobile Remote interface not found.</h3>"
 
 

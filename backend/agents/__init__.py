@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+_backend_dir = Path(__file__).resolve().parent.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 from .browser_agent import browser_agent, BrowserAgent
 from .file_agent import file_agent, FileAgent
 from .system_agent import system_agent, SystemAgent
