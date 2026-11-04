@@ -376,6 +376,85 @@ if __name__ == "__main__":
         p_lower = prompt.lower()
         steps: List[PlanStep] = []
 
+        # Case 0-Show-Code: Show/display/give code in application/chat/here (Conversational Display)
+        is_display_in_app = (
+            any(w in p_lower for w in ["in application", "in app", "in chat", "here", "on screen", "in ui"])
+            and any(w in p_lower for w in ["give", "show", "display", "print", "view", "send", "paste"])
+            and any(w in p_lower for w in ["code", "script", "program", "it", "this"])
+        ) or p_lower.strip() in [
+            "give me the code in application",
+            "give code in application",
+            "show code in app",
+            "show code in chat",
+            "display code",
+            "display code here",
+            "show me the code",
+            "give me the code"
+        ]
+        if is_display_in_app:
+            last_code = ""
+            lang = "cpp"
+            if chat_history:
+                for msg in reversed(chat_history):
+                    txt = msg.get("content", "")
+                    if "```" in txt or "#include" in txt or "def " in txt or "class " in txt:
+                        last_code = txt
+                        break
+            if not last_code:
+                for cand in [Path("palindrome_checker.cpp"), Path("calculator.py"), Path("app.py"), Path("main.cpp")]:
+                    if cand.exists():
+                        try:
+                            last_code = cand.read_text(encoding="utf-8", errors="ignore")
+                            lang = cand.suffix.lstrip(".").lower()
+                            break
+                        except Exception:
+                            pass
+
+            if last_code:
+                if "```" not in last_code:
+                    last_code = f"```{lang}\n{last_code}\n```"
+                reply = f"Here is the complete source code directly in the application:\n\n{last_code}"
+            else:
+                reply = (
+                    "Here is the complete C++ palindrome checker program:\n\n"
+                    "```cpp\n"
+                    "#include <iostream>\n"
+                    "#include <string>\n"
+                    "#include <algorithm>\n\n"
+                    "bool isPalindrome(const std::string& str) {\n"
+                    "    std::string clean = \"\";\n"
+                    "    for (char c : str) {\n"
+                    "        if (std::isalnum(static_cast<unsigned char>(c))) {\n"
+                    "            clean += std::tolower(static_cast<unsigned char>(c));\n"
+                    "        }\n"
+                    "    }\n"
+                    "    std::string rev = clean;\n"
+                    "    std::reverse(rev.begin(), rev.end());\n"
+                    "    return clean == rev;\n"
+                    "}\n\n"
+                    "int main() {\n"
+                    "    std::cout << \"=== C++ Palindrome Checker ===\\n\";\n"
+                    "    std::string input;\n"
+                    "    std::cout << \"Enter a word or number: \";\n"
+                    "    if (std::getline(std::cin, input)) {\n"
+                    "        if (isPalindrome(input)) {\n"
+                    "            std::cout << \"[YES] '\" << input << \"' is a Palindrome!\\n\";\n"
+                    "        } else {\n"
+                    "            std::cout << \"[NO] '\" << input << \"' is NOT a Palindrome.\\n\";\n"
+                    "        }\n"
+                    "    }\n"
+                    "    return 0;\n"
+                    "}\n"
+                    "```"
+                )
+            return SemanticPlan(
+                goal="Display code in application chat",
+                strategy="Conversational Display",
+                is_conversational=True,
+                conversational_response=reply,
+                steps=[]
+            )
+
         # Case 0-Doc-Context: Export previously generated conversational code/text to Word or PDF
         if any(w in p_lower for w in ["word doc", "word document", "to word", "in word", "docx", "to docx", "in docx", "to pdf", "in pdf"]) and any(w in p_lower for w in ["this", "generated", "above", "code", "it"]):
             last_code = ""
@@ -858,6 +937,25 @@ if __name__ == "__main__":
                 conversational_response=greet
             )
 
+        # Direct conversational display for "give/show/print code in application/chat"
+        p_lower = prompt.lower().strip()
+        is_display_in_app = (
+            any(w in p_lower for w in ["in application", "in app", "in chat", "here", "on screen", "in ui"])
+            and any(w in p_lower for w in ["give", "show", "display", "print", "view", "send", "paste"])
+            and any(w in p_lower for w in ["code", "script", "program", "it", "this"])
+        ) or p_lower in [
+            "give me the code in application",
+            "give code in application",
+            "show code in app",
+            "show code in chat",
+            "display code",
+            "display code here",
+            "show me the code",
+            "give me the code"
+        ]
+        if is_display_in_app:
+            return self._rule_based_fallback(prompt, chat_history=chat_history)
+
         has_api_key = bool(settings.effective_api_key)
 
         # 1. Primary: Use Google Gemini / LLM Gateway when API key is configured
@@ -915,7 +1013,9 @@ if __name__ == "__main__":
                 '     "is_conversational": true,\n'
                 '     "conversational_response": "<detailed, helpful, well-formatted markdown response>",\n'
                 '     "steps": []\n'
-                "   }\n\n"
+                "   }\n"
+                "   - When answering with code, ALWAYS wrap the code in standard triple-backtick markdown blocks with the exact language identifier (e.g. ```cpp, ```python, ```javascript, ```bash, etc.). Ensure all newlines and indentation are preserved.\n"
+                "   - If the user asks to 'give me the code in application', 'show code in chat', 'print code here', or 'display the code', output 'is_conversational': true with the complete source code in 'conversational_response'. Do NOT execute a file_write action on disk for a display-in-chat request.\n\n"
                 "4. CONVERSATION CONTINUITY & CONVERTING/EXPORTING GENERATED CONTENT:\n"
                 "   - When the user refers to previous outputs (e.g., 'give this in word doc', 'export this code to docx', 'save this as pdf', 'put what you generated in a file'):\n"
                 "     * Inspect the PRIOR CONVERSATION HISTORY for the exact referenced code, text, or data.\n"

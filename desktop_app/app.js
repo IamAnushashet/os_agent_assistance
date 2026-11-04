@@ -24,16 +24,211 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function guessLanguage(code) {
+  const sample = (code || '').slice(0, 600).toLowerCase();
+  if (sample.includes('#include') || sample.includes('std::') || sample.includes('cout <<')) return 'cpp';
+  if (sample.includes('import ') || sample.includes('def ') || sample.includes('elif ') || sample.includes('print(')) return 'python';
+  if (sample.includes('function ') || sample.includes('const ') || sample.includes('console.log') || sample.includes('let ')) return 'javascript';
+  if (sample.includes('<html>') || sample.includes('<!doctype') || sample.includes('</div>')) return 'html';
+  if (sample.includes('select ') || sample.includes('create table') || sample.includes('insert into')) return 'sql';
+  if (sample.trim().startsWith('{') || sample.trim().startsWith('[')) return 'json';
+  if (sample.includes('curl ') || sample.includes('apt-get') || sample.includes('pip install') || sample.includes('npm install')) return 'bash';
+  if (sample.includes('public class ') || sample.includes('system.out.println')) return 'java';
+  return 'code';
+}
+
+function isCodeLikeText(text) {
+  if (!text || text.length < 25) return false;
+  if (text.includes('```')) return false;
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length < 3) return false;
+
+  let codeSignalCount = 0;
+  const codePatterns = [
+    /^#include\s*[<"]/i,
+    /^(import|from)\s+[\w\.]+/i,
+    /^(def|class)\s+\w+/i,
+    /^(const|let|var)\s+\w+\s*=/i,
+    /^function\s+\w+\s*\(/i,
+    /^(public|private|protected)\s+(class|static|void|int|string)/i,
+    /^(int|void|float|double|bool|char|auto)\s+\w+\s*\(.*?\)/i,
+    /^(if|for|while)\s*\(.*?\)\s*\{/i,
+    /^using\s+namespace\s+/i,
+    /;\s*$/,
+    /\{\s*$/,
+    /^\/\//,
+    /^#\s+(?!#)/
+  ];
+
+  for (const line of lines) {
+    if (codePatterns.some(p => p.test(line))) {
+      codeSignalCount++;
+    }
+  }
+
+  return (codeSignalCount / lines.length) >= 0.35;
+}
+
+function highlightSyntax(code, lang) {
+  if (!code) return '';
+  const langLower = (lang || '').toLowerCase();
+
+  const pythonKeywords = new Set([
+    'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
+    'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from',
+    'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not',
+    'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+    'True', 'False', 'None'
+  ]);
+  const pythonBuiltins = new Set([
+    'print', 'input', 'int', 'float', 'str', 'bool', 'list', 'dict', 'set',
+    'tuple', 'len', 'range', 'enumerate', 'zip', 'open', 'type', 'sum',
+    'min', 'max', 'abs', 'round', 'sorted', 'map', 'filter', 'all', 'any',
+    'isinstance', 'super', 'dir', 'id', 'help', 'exit'
+  ]);
+
+  const cppKeywords = new Set([
+    'auto', 'bool', 'break', 'case', 'catch', 'char', 'class', 'const',
+    'constexpr', 'continue', 'default', 'delete', 'do', 'double', 'else',
+    'enum', 'explicit', 'export', 'extern', 'false', 'float', 'for', 'friend',
+    'goto', 'if', 'inline', 'int', 'long', 'mutable', 'namespace', 'new',
+    'noexcept', 'nullptr', 'operator', 'private', 'protected', 'public',
+    'register', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
+    'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid',
+    'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile',
+    'wchar_t', 'while'
+  ]);
+  const cppBuiltins = new Set([
+    'std', 'cout', 'cin', 'cerr', 'endl', 'string', 'vector', 'map', 'set',
+    'pair', 'make_pair', 'push_back', 'pop_back', 'size', 'length', 'empty',
+    'clear', 'begin', 'end', 'to_string', 'stoi', 'stod', 'tolower', 'toupper',
+    'isalnum', 'isalpha', 'isdigit', 'reverse', 'sort', 'min', 'max', 'printf', 'scanf'
+  ]);
+
+  const jsKeywords = new Set([
+    'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
+    'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends',
+    'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new',
+    'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var',
+    'void', 'while', 'with', 'yield', 'let', 'static', 'true', 'false',
+    'null', 'undefined', 'NaN'
+  ]);
+  const jsBuiltins = new Set([
+    'console', 'log', 'warn', 'error', 'info', 'document', 'window', 'fetch',
+    'JSON', 'parse', 'stringify', 'Math', 'floor', 'ceil', 'round', 'random',
+    'parseInt', 'parseFloat', 'setTimeout', 'setInterval', 'clearTimeout',
+    'Array', 'Object', 'String', 'Number', 'Boolean', 'Promise', 'Map', 'Set'
+  ]);
+
+  const javaKeywords = new Set([
+    'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char',
+    'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
+    'extends', 'final', 'finally', 'float', 'for', 'goto', 'if', 'implements',
+    'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new',
+    'package', 'private', 'protected', 'public', 'return', 'short', 'static',
+    'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
+    'transient', 'try', 'void', 'volatile', 'while', 'true', 'false', 'null'
+  ]);
+  const javaBuiltins = new Set([
+    'System', 'out', 'println', 'print', 'Scanner', 'String', 'Math', 'Integer',
+    'Double', 'Boolean', 'List', 'ArrayList', 'Map', 'HashMap', 'Set', 'HashSet',
+    'Arrays', 'Collections', 'Override'
+  ]);
+
+  let keywords = pythonKeywords;
+  let builtins = pythonBuiltins;
+  const isPy = ['python', 'py'].includes(langLower);
+  const isCpp = ['cpp', 'c++', 'c', 'h', 'hpp', 'cs'].includes(langLower);
+  const isJs = ['js', 'javascript', 'ts', 'typescript', 'jsx', 'tsx'].includes(langLower);
+  const isJava = ['java'].includes(langLower);
+
+  if (isCpp) {
+    keywords = cppKeywords;
+    builtins = cppBuiltins;
+  } else if (isJs) {
+    keywords = jsKeywords;
+    builtins = jsBuiltins;
+  } else if (isJava) {
+    keywords = javaKeywords;
+    builtins = javaBuiltins;
+  }
+
+  const commentPattern = isPy
+    ? '(#[^\\r\\n]*)'
+    : '(\\/\\/[^\\r\\n]*|\\/\\*[\\s\\S]*?\\*\\/|#[^\\r\\n]*)';
+
+  const tokenRegex = new RegExp(
+    '(".*?"|\'.*?\'|`[\\s\\S]*?`)' +
+    '|' + commentPattern +
+    '|(\\b\\d+(?:\\.\\d+)?\\b)' +
+    '|([a-zA-Z_$][a-zA-Z0-9_$]*)' +
+    '|([!=+\\-*\\/%&|^~<>:]+)' +
+    '|(\\s+)' +
+    '|([^\\s\\w])',
+    'g'
+  );
+
+  let html = '';
+  let match;
+
+  while ((match = tokenRegex.exec(code)) !== null) {
+    const [full, str, comment, num, word, op, ws, punct] = match;
+
+    if (str) {
+      html += `<span class="tok-string">${escapeHtml(str)}</span>`;
+    } else if (comment) {
+      if (isCpp && comment.trim().startsWith('#include')) {
+        const incMatch = comment.match(/(#include)\s*(<[^>]+>|"[^"]+")?/);
+        if (incMatch) {
+          html += `<span class="tok-keyword">${escapeHtml(incMatch[1])}</span>`;
+          if (incMatch[2]) {
+            html += ` <span class="tok-string">${escapeHtml(incMatch[2])}</span>`;
+          }
+        } else {
+          html += `<span class="tok-keyword">${escapeHtml(comment)}</span>`;
+        }
+      } else {
+        html += `<span class="tok-comment">${escapeHtml(comment)}</span>`;
+      }
+    } else if (num) {
+      html += `<span class="tok-number">${escapeHtml(num)}</span>`;
+    } else if (word) {
+      if (keywords.has(word)) {
+        html += `<span class="tok-keyword">${escapeHtml(word)}</span>`;
+      } else if (builtins.has(word)) {
+        html += `<span class="tok-builtin">${escapeHtml(word)}</span>`;
+      } else {
+        html += `<span class="tok-ident">${escapeHtml(word)}</span>`;
+      }
+    } else if (op) {
+      html += `<span class="tok-operator">${escapeHtml(op)}</span>`;
+    } else if (ws) {
+      html += ws;
+    } else if (punct) {
+      html += escapeHtml(punct);
+    }
+  }
+
+  return html || escapeHtml(code);
+}
+
 function renderMarkdown(text) {
   if (text === null || text === undefined) return '';
-  const str = String(text);
+  let str = String(text);
+
+  // If the entire text is raw code without markdown backticks, automatically wrap it in a terminal code fence
+  if (isCodeLikeText(str)) {
+    const detectedLang = guessLanguage(str);
+    str = '```' + detectedLang + '\n' + str + '\n```';
+  }
 
   // 1. Extract fenced code blocks first to protect contents from HTML escaping & formatting
   const codeBlocks = [];
   let processed = str.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n?([\s\S]*?)```/g, (match, lang, code) => {
     const placeholder = `@@@NEXUS_CODEBLOCK_${codeBlocks.length}@@@`;
     codeBlocks.push({
-      lang: lang ? lang.trim() : 'code',
+      lang: lang ? lang.trim() : guessLanguage(code),
       code: code
     });
     return placeholder;
@@ -67,60 +262,198 @@ function renderMarkdown(text) {
   processed = processed.replace(/\r?\n\r?\n/g, '<div style="margin-bottom:8px;"></div>');
   processed = processed.replace(/\r?\n/g, '<br>');
 
-  // 8. Re-inject Code Blocks with dark container, language badge, and Copy button
+  // Try to find any mentioned file name in text
+  const fileMatch = str.match(/(?:Saved locally to|file|named|script)\s+[`"']?([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)[`"']?/i);
+  const detectedFilename = fileMatch ? fileMatch[1] : '';
+
+  // 8. Re-inject Code Blocks into authentic Terminal UI Window Design (matching Image 4)
   codeBlocks.forEach((cb, idx) => {
     const trimmedCode = cb.code.replace(/^\n+|\n+$/g, '');
-    const escapedCode = escapeHtml(trimmedCode);
     const langLower = (cb.lang || 'code').toLowerCase();
-    let displayLang = cb.lang ? cb.lang.toUpperCase() : 'CODE';
-    if (langLower === 'cpp' || langLower === 'c++') displayLang = 'C++';
-    else if (langLower === 'py' || langLower === 'python') displayLang = 'Python';
-    else if (langLower === 'js' || langLower === 'javascript') displayLang = 'JavaScript';
-    else if (langLower === 'sh' || langLower === 'bash') displayLang = 'Terminal / Bash';
-    else if (langLower === 'json') displayLang = 'JSON';
-    else if (langLower === 'sql') displayLang = 'SQL';
-    else if (langLower === 'html') displayLang = 'HTML';
-    else if (langLower === 'css') displayLang = 'CSS';
+    const highlightedCode = highlightSyntax(trimmedCode, langLower);
 
-    const blockHtml = `
-      <div class="code-block-container">
-        <div class="code-block-header">
-          <span class="code-lang-tag">${escapeHtml(displayLang)}</span>
-          <button class="btn-copy-snippet" onclick="copyCodeSnippet(this)">
-            <span class="copy-icon">📋</span> Copy
-          </button>
+    let displayLang = cb.lang ? cb.lang : 'Terminal';
+    let defaultFile = detectedFilename || 'snippet.txt';
+
+    if (langLower === 'cpp' || langLower === 'c++') {
+      displayLang = 'C++';
+      if (!detectedFilename) defaultFile = 'main.cpp';
+    } else if (langLower === 'py' || langLower === 'python') {
+      displayLang = 'Python';
+      if (!detectedFilename) defaultFile = 'script.py';
+    } else if (langLower === 'js' || langLower === 'javascript') {
+      displayLang = 'JavaScript';
+      if (!detectedFilename) defaultFile = 'app.js';
+    } else if (langLower === 'ts' || langLower === 'typescript') {
+      displayLang = 'TypeScript';
+      if (!detectedFilename) defaultFile = 'index.ts';
+    } else if (langLower === 'sh' || langLower === 'bash' || langLower === 'zsh') {
+      displayLang = 'Terminal';
+      if (!detectedFilename) defaultFile = 'command.sh';
+    } else if (langLower === 'json') {
+      displayLang = 'JSON';
+      if (!detectedFilename) defaultFile = 'data.json';
+    } else if (langLower === 'sql') {
+      displayLang = 'SQL';
+      if (!detectedFilename) defaultFile = 'query.sql';
+    } else if (langLower === 'html') {
+      displayLang = 'HTML';
+      if (!detectedFilename) defaultFile = 'index.html';
+    } else if (langLower === 'css') {
+      displayLang = 'CSS';
+      if (!detectedFilename) defaultFile = 'style.css';
+    } else if (langLower === 'java') {
+      displayLang = 'Java';
+      if (!detectedFilename) defaultFile = 'Main.java';
+    } else if (langLower === 'c') {
+      displayLang = 'C';
+      if (!detectedFilename) defaultFile = 'main.c';
+    }
+
+    const terminalHtml = `
+      <div class="terminal-window" data-lang="${escapeHtml(langLower)}" data-filename="${escapeHtml(defaultFile)}">
+        <div class="terminal-header">
+          <div class="terminal-header-left">
+            <div class="terminal-code-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+            </div>
+            <span class="terminal-lang-title">${escapeHtml(displayLang)}</span>
+          </div>
+          <div class="terminal-header-right">
+            <button class="btn-terminal-action btn-popout" onclick="openTerminalSnippet(this)" title="Open in Windows editor / Export file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </button>
+            <button class="btn-terminal-action btn-copy" onclick="copyTerminalCode(this)" title="Copy code to clipboard">
+              <svg class="copy-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+            <button class="btn-terminal-run" onclick="runTerminalCode(this)" title="Execute this script on Windows machine">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="6 4 19 12 6 20 6 4"></polygon>
+              </svg>
+              <span>Run</span>
+            </button>
+          </div>
         </div>
-        <pre><code class="language-${escapeHtml(langLower)}">${escapedCode}</code></pre>
+        <div class="terminal-body">
+          <pre class="terminal-pre"><code class="language-${escapeHtml(langLower)}">${highlightedCode}</code></pre>
+        </div>
       </div>
     `;
-    processed = processed.replace(`@@@NEXUS_CODEBLOCK_${idx}@@@`, blockHtml);
+    processed = processed.replace(`@@@NEXUS_CODEBLOCK_${idx}@@@`, terminalHtml);
   });
 
   return `<div class="markdown-body">${processed}</div>`;
 }
 
-function copyCodeSnippet(btn) {
-  const container = btn.closest('.code-block-container');
-  if (!container) return;
-  const codeEl = container.querySelector('code');
+function copyTerminalCode(btn) {
+  const terminalWindow = btn.closest('.terminal-window') || btn.closest('.code-block-container');
+  if (!terminalWindow) return;
+  const codeEl = terminalWindow.querySelector('code');
   if (!codeEl) return;
 
   const rawText = codeEl.innerText;
+  const originalHtml = btn.innerHTML;
+
+  const onSuccess = () => {
+    btn.classList.add('copied');
+    btn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    `;
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = originalHtml;
+    }, 2000);
+  };
+
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(rawText).then(() => {
-      btn.innerHTML = '<span style="color:#10b981;">✓</span> Copied!';
-      btn.classList.add('copied');
-      setTimeout(() => {
-        btn.innerHTML = '<span class="copy-icon">📋</span> Copy';
-        btn.classList.remove('copied');
-      }, 2000);
-    }).catch(() => fallbackCopy(rawText, btn));
+    navigator.clipboard.writeText(rawText).then(onSuccess).catch(() => {
+      fallbackCopyText(rawText, onSuccess);
+    });
   } else {
-    fallbackCopy(rawText, btn);
+    fallbackCopyText(rawText, onSuccess);
   }
 }
 
-function fallbackCopy(text, btn) {
+async function runTerminalCode(btn) {
+  const terminalWindow = btn.closest('.terminal-window');
+  if (!terminalWindow) return;
+  const codeEl = terminalWindow.querySelector('code');
+  if (!codeEl) return;
+  const rawCode = codeEl.innerText.trim();
+  const lang = terminalWindow.getAttribute('data-lang') || 'code';
+  const filename = terminalWindow.getAttribute('data-filename') || '';
+
+  const originalHtml = btn.innerHTML;
+  btn.classList.add('running');
+  btn.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;">⏳</span> Running...`;
+
+  try {
+    let commandPrompt = "";
+    if (filename && filename !== 'snippet.txt' && !filename.startsWith('snippet.')) {
+      commandPrompt = `Compile and run '${filename}' in Windows terminal and show output`;
+    } else if (lang === 'cpp' || lang === 'c++' || lang === 'c') {
+      commandPrompt = `Compile and run this C++ code in Windows terminal and show the execution output:\n\`\`\`cpp\n${rawCode}\n\`\`\``;
+    } else if (lang === 'python' || lang === 'py') {
+      commandPrompt = `Run this Python code in Windows terminal and show the execution output:\n\`\`\`python\n${rawCode}\n\`\`\``;
+    } else if (lang === 'bash' || lang === 'sh' || lang === 'cmd' || lang === 'bat') {
+      commandPrompt = `Run this command in Windows terminal and display the output:\n\`\`\`cmd\n${rawCode}\n\`\`\``;
+    } else {
+      commandPrompt = `Execute this ${lang} program on Windows and show the execution output:\n\`\`\`${lang}\n${rawCode}\n\`\`\``;
+    }
+
+    if (typeof submitPrompt === 'function') {
+      await submitPrompt(commandPrompt);
+    }
+  } catch (err) {
+    console.error("Failed to run code:", err);
+  } finally {
+    setTimeout(() => {
+      btn.classList.remove('running');
+      btn.innerHTML = originalHtml;
+    }, 2000);
+  }
+}
+
+async function openTerminalSnippet(btn) {
+  const terminalWindow = btn.closest('.terminal-window');
+  if (!terminalWindow) return;
+  const codeEl = terminalWindow.querySelector('code');
+  if (!codeEl) return;
+  const rawCode = codeEl.innerText.trim();
+  const filename = terminalWindow.getAttribute('data-filename') || '';
+
+  if (filename && filename !== 'snippet.txt' && !filename.startsWith('snippet.')) {
+    if (typeof submitPrompt === 'function') {
+      await submitPrompt(`Open '${filename}' in Windows default application`);
+    }
+  } else {
+    const lang = terminalWindow.getAttribute('data-lang') || 'txt';
+    const ext = lang === 'cpp' ? 'cpp' : (lang === 'python' ? 'py' : (lang === 'javascript' ? 'js' : lang));
+    const blob = new Blob([rawCode], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `code_export.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+}
+
+function fallbackCopyText(text, callback) {
   const textarea = document.createElement('textarea');
   textarea.value = text;
   textarea.style.position = 'fixed';
@@ -129,17 +462,15 @@ function fallbackCopy(text, btn) {
   textarea.select();
   try {
     document.execCommand('copy');
-    btn.innerHTML = '<span style="color:#10b981;">✓</span> Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.innerHTML = '<span class="copy-icon">📋</span> Copy';
-      btn.classList.remove('copied');
-    }, 2000);
+    if (callback) callback();
   } catch (e) {}
   document.body.removeChild(textarea);
 }
 
-window.copyCodeSnippet = copyCodeSnippet;
+window.copyTerminalCode = copyTerminalCode;
+window.copyCodeSnippet = copyTerminalCode;
+window.runTerminalCode = runTerminalCode;
+window.openTerminalSnippet = openTerminalSnippet;
 window.renderMarkdown = renderMarkdown;
 
 // DOM Elements — Command Deck

@@ -296,6 +296,7 @@ class MultiAgentOrchestrator:
                     "title": step.get("title"),
                     "agent": agent_name,
                     "tool": tool_name,
+                    "params": params,
                     "success": success,
                     "result": action_res,
                     "duration_seconds": duration
@@ -306,6 +307,7 @@ class MultiAgentOrchestrator:
                     "step_index": step_idx,
                     "agent": agent_name,
                     "tool": tool_name,
+                    "params": params,
                     "success": success,
                     "summary": action_res.get("message") or ("Step completed" if success else action_res.get("error")),
                     "duration_seconds": duration
@@ -330,13 +332,51 @@ class MultiAgentOrchestrator:
 
             # 3. COMPLETION
             summary_parts = []
+            code_displays = []
             for a in executed_actions:
+                tool_name = a.get("tool", "")
+                params = a.get("params", {})
                 res = a.get("result", {})
                 msg = res.get("message") or res.get("summary") or res.get("analysis")
-                if msg:
+
+                if tool_name == "file_write":
+                    code_content = params.get("content", "").strip()
+                    target_path = params.get("path") or res.get("path") or "script.py"
+
+                    # If params didn't have content, attempt to read directly from written file on disk
+                    if not code_content and target_path and Path(target_path).exists():
+                        try:
+                            code_content = Path(target_path).read_text(encoding="utf-8", errors="ignore").strip()
+                        except Exception:
+                            pass
+
+                    ext = Path(target_path).suffix.lstrip(".").lower() or "code"
+                    filename = Path(target_path).name
+
+                    code_exts = {"py", "cpp", "c", "h", "hpp", "java", "js", "ts", "jsx", "tsx", "html", "css", "sh", "bat", "cmd", "ps1", "json", "sql", "cs", "rb", "go", "rs", "php"}
+                    is_code = ext in code_exts or any(k in code_content for k in ["#include", "def ", "class ", "import ", "function", "public static", "<!DOCTYPE"])
+
+                    if is_code and len(code_content) > 0:
+                        bytes_cnt = res.get("bytes_written") or len(code_content.encode("utf-8"))
+                        code_displays.append(
+                            f"Saved locally to `{filename}` ({bytes_cnt} bytes):\n\n"
+                            f"```{ext}\n{code_content}\n```"
+                        )
+                    elif msg:
+                        summary_parts.append(msg)
+                elif msg:
                     summary_parts.append(msg)
-            full_summary = " ".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
-            spoken = speech_service.filter_text_for_speech(full_summary)
+
+            if code_displays:
+                # Filter out redundant "Successfully written to <filename>" when code_displays already presents it
+                clean_parts = [p for p in summary_parts if not any(cd_fn in p for cd_fn in [Path(a.get("params", {}).get("path", "")).name for a in executed_actions if a.get("params", {}).get("path")])]
+                full_summary = "\n\n".join(code_displays)
+                if clean_parts:
+                    full_summary = " ".join(clean_parts) + "\n\n" + full_summary
+                spoken = f"Successfully generated and saved {len(code_displays)} code file to your Windows workspace."
+            else:
+                full_summary = " ".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
+                spoken = speech_service.filter_text_for_speech(full_summary)
 
             # If any action created or converted a document, attach created_document directly to final_report
             created_document = None

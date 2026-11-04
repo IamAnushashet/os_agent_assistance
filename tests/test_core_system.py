@@ -268,4 +268,38 @@ def test_remote_mobile_search_and_web_app_control():
     assert "youtube.com" in plan3.steps[0].params["url"].lower()
 
 
+def test_semantic_planner_conversational_code_display():
+    """Verifies that requests to show or give code in the application return conversational markdown code."""
+    # 1. Direct request to show code in app
+    plan = semantic_planner._rule_based_fallback("give me the code in application")
+    assert plan.is_conversational is True
+    assert plan.conversational_response is not None
+    assert "```" in plan.conversational_response
+    assert len(plan.steps) == 0
+
+    # 2. Follow-up request using chat history
+    history = [
+        {"role": "user", "content": "write python palindrome code"},
+        {"role": "assistant", "content": "Here is python code:\n```python\ndef is_palindrome(s):\n    return s == s[::-1]\n```"}
+    ]
+    plan2 = semantic_planner._rule_based_fallback("show code in chat", chat_history=history)
+    assert plan2.is_conversational is True
+    assert "is_palindrome" in plan2.conversational_response
+    assert "```python" in plan2.conversational_response
+
+
+@pytest.mark.anyio
+async def test_orchestrator_code_file_write_execution(tmp_path):
+    """Verifies that orchestrator executes code writes and stores the file on disk."""
+    code_file = tmp_path / "test_pal.cpp"
+    code_text = "#include <iostream>\nint main() { return 0; }\n"
+    
+    res = await tool_registry.execute("file_write", {"path": str(code_file), "content": code_text})
+    assert res["success"] is True
+    assert code_file.exists()
+    assert "#include <iostream>" in code_file.read_text()
+
+
+
+
 

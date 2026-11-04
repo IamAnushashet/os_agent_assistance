@@ -16,7 +16,7 @@ if not exist "%PYTHON_EXE%" (
 )
 
 echo [*] Starting Assistant Server on Port 8000...
-start "" http://localhost:8000/desktop/index.html
+start "" /b cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:8000/desktop/index.html"
 
 "%PYTHON_EXE%" -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
 pause

@@ -844,6 +844,7 @@ def get_remote_page():
 
 
 @app.get("/")
+@app.get("/index.html")
 def get_desktop_page():
     return RedirectResponse(url="/desktop/index.html")
 
