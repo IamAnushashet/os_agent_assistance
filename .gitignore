@@ -52,3 +52,10 @@ $RECYCLE.BIN/
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# PyInstaller and PyArmor build outputs
+build/
+dist/
+build_staging/
+test_obf/
+pyarmor.bug.log
