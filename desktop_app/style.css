@@ -774,6 +774,7 @@ body {
   font-size: 10px;
 }
 
+.task-status.planning,
 .task-status.running { background: rgba(245, 158, 11, 0.15); color: var(--accent-warning); }
 .task-status.completed { background: rgba(16, 185, 129, 0.15); color: var(--accent-success); }
 .task-status.failed { background: rgba(239, 68, 68, 0.15); color: var(--accent-danger); }

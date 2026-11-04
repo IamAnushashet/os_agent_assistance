@@ -151,6 +151,21 @@ class MultiAgentOrchestrator:
         self.active_tasks[task_id] = worker
         return task_id
 
+    def _print_console_response(self, task_id: str, prompt: str, text: str):
+        """Prints the AI Assistant response directly to the executable stdout/terminal console."""
+        try:
+            border = "=" * 70
+            divider = "-" * 70
+            enc = sys.stdout.encoding or "utf-8"
+            safe_text = str(text).encode(enc, errors="replace").decode(enc, errors="replace")
+            safe_prompt = str(prompt).encode(enc, errors="replace").decode(enc, errors="replace")
+            print(f"\n{border}\n[AI ASSISTANT RESPONSE] Task: {task_id} - Prompt: '{safe_prompt}'\n{divider}\n{safe_text}\n{border}\n", flush=True)
+        except Exception:
+            try:
+                print(f"\n[AI ASSISTANT RESPONSE - {task_id}]: {text}\n", flush=True)
+            except Exception:
+                pass
+
     async def _run_multi_agent_pipeline(
         self,
         task_id: str,
@@ -204,6 +219,7 @@ class MultiAgentOrchestrator:
                 save_completion_report(task_id, report)
                 update_task_status(task_id, TaskState.COMPLETED)
                 await self.broadcast_event(task_id, "TASK_COMPLETED", report)
+                self._print_console_response(task_id, prompt, reply)
                 return
 
             # 2. EXECUTION
@@ -341,14 +357,18 @@ class MultiAgentOrchestrator:
 
                 if tool_name == "file_write":
                     code_content = params.get("content", "").strip()
-                    target_path = params.get("path") or res.get("path") or "script.py"
+                    target_path = res.get("path") or params.get("path") or "script.py"
 
                     # If params didn't have content, attempt to read directly from written file on disk
-                    if not code_content and target_path and Path(target_path).exists():
-                        try:
-                            code_content = Path(target_path).read_text(encoding="utf-8", errors="ignore").strip()
-                        except Exception:
-                            pass
+                    if not code_content and target_path:
+                        for p_cand in [Path(target_path), (PROJECT_ROOT / target_path).resolve()]:
+                            if p_cand.exists() and p_cand.is_file():
+                                try:
+                                    code_content = p_cand.read_text(encoding="utf-8", errors="ignore").strip()
+                                    if code_content:
+                                        break
+                                except Exception:
+                                    pass
 
                     ext = Path(target_path).suffix.lstrip(".").lower() or "code"
                     filename = Path(target_path).name
@@ -431,6 +451,7 @@ class MultiAgentOrchestrator:
             save_completion_report(task_id, final_report)
             update_task_status(task_id, TaskState.COMPLETED)
             await self.broadcast_event(task_id, "TASK_COMPLETED", final_report)
+            self._print_console_response(task_id, prompt, full_summary)
             log_audit(task_id, "TASK_COMPLETED", {"agents": list(agents_engaged), "actions": len(executed_actions)})
 
         except asyncio.CancelledError:

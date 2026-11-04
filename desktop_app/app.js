@@ -851,10 +851,13 @@ function pollTaskStatus(taskId, card) {
       if (!res.ok) return;
       const task = await res.json();
 
-      card.querySelector('.task-id-badge').innerText = `TASK // ${task.id}`;
+      const idBadge = card.querySelector('.task-id-badge');
+      if (idBadge) idBadge.innerText = `TASK // ${task.id}`;
       const statusBadge = card.querySelector('.task-status');
-      statusBadge.innerText = task.status;
-      statusBadge.className = `task-status ${task.status.toLowerCase()}`;
+      if (statusBadge) {
+        statusBadge.innerText = task.status;
+        statusBadge.className = `task-status ${task.status.toLowerCase()}`;
+      }
 
       // Update Steps
       const stepsContainer = card.querySelector('.steps-container');
@@ -927,8 +930,13 @@ function pollTaskStatus(taskId, card) {
         // Check if any document (.pptx or .pdf) was created!
         checkForCreatedDocument(card, task);
         loadDocuments();
+        if (typeof chatViewport !== 'undefined' && chatViewport) {
+          chatViewport.scrollTop = chatViewport.scrollHeight;
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('pollTaskStatus error:', e);
+    }
   }, 750);
 }
 
