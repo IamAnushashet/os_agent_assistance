@@ -88,7 +88,7 @@ class PermissionEngine:
             return False, "HIGH_RISK_EXPLICIT_APPROVAL_REQUIRED"
 
         # Full Access mode (autonomous within balanced bounds)
-        if self._full_access_grants.get(task_id) or permission_mode == "full_access":
+        if self._full_access_grants.get(task_id) or permission_mode in ["full_access", "autonomous"]:
             return True, "FULL_ACCESS_MODE"
 
         # Check strict human confirmation mode: when ask_every_step is active, prompt for every action step!

@@ -342,7 +342,7 @@
           if (!r.ok) return;
           const t = await r.json();
 
-          if (t.status === 'RUNNING') {
+          if (['RUNNING', 'EXECUTING', 'PLANNING', 'VERIFYING'].includes(t.status)) {
             hudDot.className = "pulse-dot running";
             hudStatusText.textContent = "Executing...";
             const plan = t.plan || {};

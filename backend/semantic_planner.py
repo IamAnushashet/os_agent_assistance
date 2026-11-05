@@ -570,6 +570,43 @@ if __name__ == "__main__":
                 ))
                 return SemanticPlan(goal="List recent files", strategy="File Discovery", steps=steps)
 
+        # Case 3B: Open or Reveal File / Folder / Recent Document
+        is_file_open = any(w in p_lower for w in ["open file", "open document", "open recent", "open the file", "open the document", "reveal in explorer", "show in explorer", "in file explorer", "in explorer", "reveal file"]) or (
+            any(k in p_lower for k in ["open", "reveal", "view"]) and any(ext in p_lower for ext in [".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".csv", ".py", ".json", ".md", ".png", ".jpg"])
+        ) or re.search(r'\b(?:open|reveal|view)\s+(?:the\s+)?(first|second|third|1st|2nd|3rd|\d+)(?:\s+one|\s+file)?\b', p_lower)
+
+        if is_file_open:
+            reveal = any(w in p_lower for w in ["in explorer", "in file explorer", "reveal", "show in folder"])
+            file_match = re.search(r'''["']([a-zA-Z]:\\[^"']+|[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)["']''', prompt)
+            ext_match = re.search(r'([a-zA-Z0-9_\-./\\]+\.(?:pdf|docx|xlsx|pptx|txt|csv|py|json|md|png|jpg))', prompt, flags=re.IGNORECASE)
+            num_match = re.search(r'\b(?:open|reveal|view)\s+(?:the\s+)?(first|second|third|1st|2nd|3rd|\d+)(?:\s+one|\s+file)?\b', prompt, flags=re.IGNORECASE)
+
+            target_f = ""
+            if file_match:
+                target_f = file_match.group(1).strip()
+            elif ext_match:
+                target_f = ext_match.group(1).strip()
+            elif num_match:
+                target_f = num_match.group(1).strip()
+            else:
+                target_f = re.sub(r"^(?:please\s+)?(?:open|reveal|view)\s+(?:the\s+)?(?:file\s+|document\s+)?", "", prompt, flags=re.IGNORECASE).strip()
+
+            tool = tool_registry.get("file_open")
+            if tool:
+                action_desc = "Reveal in File Explorer" if reveal else "Open in default application"
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"{action_desc}: '{target_f}'",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"path": target_f, "reveal": reveal},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason=f"{action_desc} for file '{target_f}'",
+                    expected_outcome=f"File '{target_f}' opened or revealed"
+                ))
+                return SemanticPlan(goal=f"Open file {target_f}", strategy="File Management", steps=steps)
+
         # Case 0-Processes: List Top Running Processes
         if any(w in p_lower for w in ["top processes", "running processes", "process list", "what is running"]):
             tool = tool_registry.get("system_list_processes")
@@ -692,7 +729,159 @@ if __name__ == "__main__":
                 reason=reason,
                 expected_outcome=f"Working application code written to '{target_path}'"
             ))
+
+            # Multi-Agent Coordination: File Agent -> System Agent for Compile and Run / Launch
+            should_run = any(r in p_lower for r in ["compile", "run", "launch", "execute", "start", "test"])
+            if should_run:
+                sys_tool = tool_registry.get("system_run_command")
+                if sys_tool:
+                    run_cmd = f"python -m py_compile '{target_path}'; Start-Process python -ArgumentList '{target_path}'"
+                    steps.append(PlanStep(
+                        step_number=2,
+                        title=f"Compile and launch application '{target_path}'",
+                        agent=sys_tool.agent,
+                        tool_name=sys_tool.name,
+                        params={"command": run_cmd},
+                        category=sys_tool.category,
+                        risk_level=sys_tool.risk_level,
+                        reason="Compile syntax and launch application window on Windows desktop",
+                        expected_outcome="Application compiled and running on Windows desktop"
+                    ))
+                return SemanticPlan(
+                    goal=f"Create, compile and launch application at {target_path}",
+                    strategy="Multi-Agent Code Creation & Launch",
+                    steps=steps
+                )
+
             return SemanticPlan(goal=f"Create application at {target_path}", strategy="Production Code Generation", steps=steps)
+
+        # Case 0-ResearchDoc: Multi-Agent Web Research + Document Publishing
+        is_research = any(w in p_lower for w in ["research", "search the web for", "look up on web", "web search for"])
+        is_doc_target = any(d in p_lower for d in ["ppt", "pptx", "presentation", "word", "docx", "excel", "xlsx", "pdf", "report"])
+        if is_research and is_doc_target:
+            topic_match = re.search(r"(?:research|search the web for|look up on web|web search for)\s+([a-zA-Z0-9_\s\-]+?)(?:\s+and\s+|\s+to\s+create|\s+into|\s+in\s+a|$)", prompt, flags=re.IGNORECASE)
+            topic = topic_match.group(1).strip() if topic_match else "Executive Market Analysis"
+
+            # Step 1: Browser Agent searches web
+            b_tool = tool_registry.get("browser_search")
+            if b_tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"Research '{topic}' on the web",
+                    agent=b_tool.agent,
+                    tool_name=b_tool.name,
+                    params={"query": topic},
+                    category=b_tool.category,
+                    risk_level=b_tool.risk_level,
+                    reason=f"Gather live web intelligence and research data for '{topic}'",
+                    expected_outcome="Web search results retrieved"
+                ))
+
+            # Step 2: File Agent generates requested document
+            doc_type = "pptx"
+            if any(w in p_lower for w in ["word", "docx"]):
+                doc_type = "docx"
+            elif any(w in p_lower for w in ["excel", "xlsx", "sheet"]):
+                doc_type = "xlsx"
+            elif any(w in p_lower for w in ["pdf", "report"]):
+                doc_type = "pdf"
+
+            if doc_type == "pptx":
+                f_tool = tool_registry.get("file_generate_presentation")
+                filename = f"{topic.replace(' ', '_')[:30]}_Presentation.pptx"
+                tool_params = {"topic": topic, "filename": filename}
+            elif doc_type == "docx":
+                f_tool = tool_registry.get("file_generate_docx")
+                filename = f"{topic.replace(' ', '_')[:30]}_Document.docx"
+                tool_params = {"topic": topic, "filename": filename}
+            elif doc_type == "xlsx":
+                f_tool = tool_registry.get("file_generate_xlsx")
+                filename = f"{topic.replace(' ', '_')[:30]}_Analysis.xlsx"
+                tool_params = {"topic": topic, "filename": filename}
+            else:
+                f_tool = tool_registry.get("file_generate_pdf")
+                filename = f"{topic.replace(' ', '_')[:30]}_Report.pdf"
+                tool_params = {"topic": topic, "filename": filename}
+
+            if f_tool:
+                steps.append(PlanStep(
+                    step_number=len(steps) + 1,
+                    title=f"Generate {doc_type.upper()} document from research findings",
+                    agent=f_tool.agent,
+                    tool_name=f_tool.name,
+                    params=tool_params,
+                    category=f_tool.category,
+                    risk_level=f_tool.risk_level,
+                    reason=f"Synthesize web research into professional {doc_type.upper()} document",
+                    expected_outcome=f"{doc_type.upper()} file created on disk"
+                ))
+
+            # Step 3: File Agent opens the document
+            o_tool = tool_registry.get("file_open")
+            if o_tool:
+                steps.append(PlanStep(
+                    step_number=len(steps) + 1,
+                    title=f"Open generated {doc_type.upper()} document",
+                    agent=o_tool.agent,
+                    tool_name=o_tool.name,
+                    params={"path": filename},
+                    category=o_tool.category,
+                    risk_level=o_tool.risk_level,
+                    reason="Present generated document in default Windows desktop application",
+                    expected_outcome="Document opened for user"
+                ))
+
+            return SemanticPlan(
+                goal=f"Research {topic} and generate {doc_type.upper()} document",
+                strategy="Multi-Agent Web Research & Document Publishing",
+                steps=steps
+            )
+
+        # Case 0-VisionClick: Multi-Agent Visual Target and Click
+        is_vision_click = any(w in p_lower for w in ["find", "locate", "search for"]) and any(c in p_lower for c in ["click", "press", "tap"]) and any(u in p_lower for u in ["button", "icon", "link", "element", "on screen", "on desktop"])
+        if is_vision_click:
+            find_match = re.search(r"(?:find|locate|search for)\s+(?:the\s+)?([a-zA-Z0-9_\s\-]+?)(?:\s+button|\s+icon|\s+link|\s+element|\s+on\s+screen|\s+and\s+click|$)", prompt, flags=re.IGNORECASE)
+            click_match = re.search(r"(?:click|press|tap)\s+(?:the\s+|on\s+)?([a-zA-Z0-9_\s\-]+?)(?:\s+button|\s+icon|\s+link|\s+element|\s+on\s+screen|$)", prompt, flags=re.IGNORECASE)
+
+            target_elem = "button"
+            if find_match and find_match.group(1).strip().lower() not in ["it", ""]:
+                target_elem = find_match.group(1).strip()
+            elif click_match and click_match.group(1).strip().lower() not in ["it", ""]:
+                target_elem = click_match.group(1).strip()
+
+            v_tool = tool_registry.get("vision_locate_target")
+            if v_tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"Visually locate '{target_elem}' on active screen",
+                    agent=v_tool.agent,
+                    tool_name=v_tool.name,
+                    params={"target_description": target_elem},
+                    category=v_tool.category,
+                    risk_level=v_tool.risk_level,
+                    reason=f"Find bounding box and centroid coordinates for '{target_elem}'",
+                    expected_outcome="Coordinates (x, y) identified"
+                ))
+
+            s_tool = tool_registry.get("system_mouse_click")
+            if s_tool:
+                steps.append(PlanStep(
+                    step_number=2,
+                    title=f"Click on '{target_elem}' coordinates",
+                    agent=s_tool.agent,
+                    tool_name=s_tool.name,
+                    params={"x": None, "y": None, "button": "left"},
+                    category=s_tool.category,
+                    risk_level=s_tool.risk_level,
+                    reason="Trigger native Windows mouse click at target location",
+                    expected_outcome="Mouse click dispatched"
+                ))
+
+            return SemanticPlan(
+                goal=f"Locate and click '{target_elem}' on screen",
+                strategy="Multi-Agent Visual Targeting and UI Interaction",
+                steps=steps
+            )
 
         # Case 0A: PowerPoint Presentation Generation
         is_pptx = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", p_lower))
@@ -1112,8 +1301,17 @@ if __name__ == "__main__":
                 "     * Inspect the PRIOR CONVERSATION HISTORY for the exact referenced code, text, or data.\n"
                 "     * Include the EXACT code or content inside the document generation parameters ('sections' for file_generate_docx / file_generate_pdf, or 'content' for file_write).\n"
                 "     * NEVER output placeholders like 'Please refer to the attached source code file or repository'. Embed the ACTUAL generated code or text!\n\n"
-                "5. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
-                "6. Output JSON ONLY.\n"
+                "5. MULTI-AGENT TASK COORDINATION (MANDATORY WHEN REQUEST INVOLVES MULTIPLE AGENTS):\n"
+                "   - When a user request asks to build/create code AND compile/run it:\n"
+                "     * Step 1 (File Agent): 'file_write' to save the complete code to disk.\n"
+                "     * Step 2 (System Agent): 'system_run_command' with command `python -m py_compile '<path>'; Start-Process python -ArgumentList '<path>'` to compile and launch.\n"
+                "   - When a user request asks to research a topic AND create a document/deck:\n"
+                "     * Step 1 (Browser Agent): 'browser_search', Step 2 (File Agent): document generation, Step 3 (File Agent): 'file_open'.\n"
+                "   - When a user request asks to find an element on screen and click it:\n"
+                "     * Step 1 (Vision Agent): 'vision_locate_target', Step 2 (System Agent): 'system_mouse_click'.\n"
+                "   - When a user asks to open or reveal a file/document: use 'file_open'.\n\n"
+                "6. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
+                "7. Output JSON ONLY.\n"
             )
 
             messages = [{"role": "system", "content": system_prompt}]

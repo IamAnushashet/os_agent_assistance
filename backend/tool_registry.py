@@ -253,12 +253,15 @@ class ToolRegistry:
         self.register(ToolDefinition(
             name="file_open",
             agent="File Agent",
-            description="Opens file in default Windows application.",
-            parameters={"path": {"type": "string"}},
+            description="Opens file in default Windows application or reveals it in File Explorer.",
+            parameters={
+                "path": {"type": "string"},
+                "reveal": {"type": "boolean", "default": False, "description": "If true, reveals and highlights the file in Windows File Explorer"}
+            },
             category=ActionCategory.SAFE_READ.value,
             risk_level=RiskLevel.LOW.value,
             handler=file_agent.open_file,
-            completion_criterion="Default application opened."
+            completion_criterion="File opened or revealed in File Explorer."
         ))
 
         self.register(ToolDefinition(

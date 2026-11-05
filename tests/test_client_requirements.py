@@ -323,3 +323,95 @@ def test_file_agent_candidate_path_resolution(monkeypatch):
     finally:
         if test_doc.exists():
             test_doc.unlink()
+
+
+def test_multi_agent_coordination_code_creation_and_run():
+    """Verify multi-agent coordination between File Agent (write code) and System Agent (compile & run)."""
+    from semantic_planner import semantic_planner
+
+    prompt = "create the calculator app and compile and run it"
+    plan = semantic_planner._rule_based_fallback(prompt)
+    assert len(plan.steps) == 2
+    assert plan.steps[0].agent == "File Agent"
+    assert plan.steps[0].tool_name == "file_write"
+    assert "calculator.py" in plan.steps[0].params["path"]
+    assert plan.steps[1].agent == "System Agent"
+    assert plan.steps[1].tool_name == "system_run_command"
+    assert "py_compile" in plan.steps[1].params["command"]
+    assert "Start-Process" in plan.steps[1].params["command"]
+    assert "Multi-Agent" in plan.strategy
+
+
+def test_multi_agent_coordination_research_and_document_publishing():
+    """Verify multi-agent coordination between Browser Agent (search) and File Agent (document generation + open)."""
+    from semantic_planner import semantic_planner
+
+    prompt = "research quantum computing and create a presentation"
+    plan = semantic_planner._rule_based_fallback(prompt)
+    assert len(plan.steps) == 3
+    assert plan.steps[0].agent == "Browser Agent"
+    assert plan.steps[0].tool_name == "browser_search"
+    assert "quantum computing" in plan.steps[0].params["query"].lower()
+    assert plan.steps[1].agent == "File Agent"
+    assert plan.steps[1].tool_name == "file_generate_presentation"
+    assert plan.steps[2].agent == "File Agent"
+    assert plan.steps[2].tool_name == "file_open"
+    assert "Multi-Agent" in plan.strategy
+
+
+def test_multi_agent_coordination_visual_target_and_click():
+    """Verify multi-agent coordination between Vision Agent (locate) and System Agent (click)."""
+    from semantic_planner import semantic_planner
+
+    prompt = "find the submit button on screen and click it"
+    plan = semantic_planner._rule_based_fallback(prompt)
+    assert len(plan.steps) == 2
+    assert plan.steps[0].agent == "Vision Agent"
+    assert plan.steps[0].tool_name == "vision_locate_target"
+    assert "submit" in plan.steps[0].params["target_description"].lower()
+    assert plan.steps[1].agent == "System Agent"
+    assert plan.steps[1].tool_name == "system_mouse_click"
+
+
+def test_file_agent_recent_files_user_directories_and_interactive_prompt():
+    """Verify get_recent_files searches user directories and returns interactive open prompt."""
+    from agents.file_agent import file_agent
+
+    res = file_agent.get_recent_files(limit=5)
+    assert res["success"] is True
+    assert res["total"] > 0
+    assert len(res["recent_files"]) > 0
+    assert "Would you like me to open any of these files for you?" in res["interactive_prompt"]
+    for f in res["recent_files"]:
+        assert "name" in f
+        assert "size_kb" in f
+        assert "modified_str" in f
+
+
+def test_file_open_reveal_in_explorer_and_index_resolution(monkeypatch):
+    """Verify open_file with reveal=True and index-based target resolution."""
+    import subprocess
+    from agents.file_agent import file_agent
+
+    opened_files = []
+    spawned_cmds = []
+
+    monkeypatch.setattr(os, "startfile", lambda p: opened_files.append(p))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: spawned_cmds.append(cmd))
+
+    # Populate last_search_results
+    file_agent.get_recent_files(limit=3)
+    assert len(file_agent.last_search_results) >= 1
+    first_path = file_agent.last_search_results[0]["path"]
+
+    # Test opening by numeric index "1"
+    res1 = file_agent.open_file("1")
+    assert res1["success"] is True
+    assert len(opened_files) == 1
+    assert opened_files[0] == first_path
+
+    # Test reveal=True launches explorer /select
+    res2 = file_agent.open_file("1", reveal=True)
+    assert res2["success"] is True
+    assert len(spawned_cmds) == 1
+    assert "explorer.exe /select" in spawned_cmds[0]

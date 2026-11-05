@@ -291,6 +291,38 @@ class MultiAgentOrchestrator:
 
                     update_task_status(task_id, TaskState.EXECUTING)
 
+                # Multi-Agent Coordination Context Passing:
+                # Dynamic parameter handoff between coordinated agent steps
+                if executed_actions:
+                    last_step = executed_actions[-1]
+                    last_res = last_step.get("result", {})
+                    last_params = last_step.get("params", {})
+                    prev_path = last_res.get("path") or last_res.get("file_path") or last_params.get("path") or ""
+
+                    # 1. File path propagation (File Agent -> System Agent / File Agent)
+                    if "path" in params and params["path"] in ["$PREV_PATH", "{prev_path}", "$LAST_FILE", ""]:
+                        if prev_path:
+                            params["path"] = prev_path
+                    elif tool_name == "file_open" and not params.get("path") and prev_path:
+                        params["path"] = prev_path
+
+                    if "file_path" in params and params["file_path"] in ["$PREV_PATH", "{prev_path}", "$LAST_FILE", ""]:
+                        if prev_path:
+                            params["file_path"] = prev_path
+
+                    # 2. Command target substitution (File Agent -> System Agent)
+                    if tool_name == "system_run_command" and "command" in params:
+                        cmd = params["command"]
+                        if ("$PREV_PATH" in cmd or "{prev_path}" in cmd) and prev_path:
+                            params["command"] = cmd.replace("$PREV_PATH", prev_path).replace("{prev_path}", prev_path)
+
+                    # 3. Vision coordinates propagation (Vision Agent -> System Agent mouse click)
+                    if tool_name == "system_mouse_click":
+                        if ("x" not in params or params.get("x") is None) and "x" in last_res:
+                            params["x"] = last_res["x"]
+                        if ("y" not in params or params.get("y") is None) and "y" in last_res:
+                            params["y"] = last_res["y"]
+
                 # Execute Registered Tool
                 t0 = time.time()
                 if tool_name.startswith("file_generate_") or tool_name.startswith("file_convert"):

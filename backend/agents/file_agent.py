@@ -6,6 +6,8 @@ automatic rolling backups in scratch/.file_backups/, and unified diff previews.
 
 import os
 import difflib
+import time
+import subprocess
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -193,28 +195,42 @@ class FileAgent:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def open_file(self, path: str) -> Dict[str, Any]:
-        """Opens file in default Windows desktop application with smart candidate resolution."""
+    def open_file(self, path: str, reveal: bool = False, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Opens file in default Windows application or reveals it in File Explorer."""
         try:
-            # Handle ordinal references (e.g. "the second one")
-            if "second" in path.lower() and len(self.last_search_results) >= 2:
+            p = None
+            path_str = str(path).strip()
+            # Handle numeric or ordinal references (e.g. "1", "2", "first", "second")
+            if path_str in ["1", "0", "first", "1st"] and len(self.last_search_results) >= 1:
+                p = Path(self.last_search_results[0]["path"])
+            elif path_str in ["2", "second", "2nd"] and len(self.last_search_results) >= 2:
                 p = Path(self.last_search_results[1]["path"])
-            elif "first" in path.lower() and len(self.last_search_results) >= 1:
+            elif path_str in ["3", "third", "3rd"] and len(self.last_search_results) >= 3:
+                p = Path(self.last_search_results[2]["path"])
+            elif path_str.isdigit() and 1 <= int(path_str) <= len(self.last_search_results):
+                p = Path(self.last_search_results[int(path_str) - 1]["path"])
+            elif "second" in path_str.lower() and len(self.last_search_results) >= 2:
+                p = Path(self.last_search_results[1]["path"])
+            elif "first" in path_str.lower() and len(self.last_search_results) >= 1:
                 p = Path(self.last_search_results[0]["path"])
             else:
-                p = self._resolve_safe_path(path)
+                p = self._resolve_safe_path(path_str, workspace_root=workspace_root)
 
             # If exact path does not exist, resolve against candidate folders (generated_documents, downloads, documents)
             if not p.exists():
                 fname = Path(path).name.lower()
                 clean_name = fname.replace(" ", "_")
+                from config import OUTPUT_DOCS_DIR
                 cands = [
+                    OUTPUT_DOCS_DIR / Path(path).name,
+                    OUTPUT_DOCS_DIR / clean_name,
                     self.default_root / "generated_documents" / Path(path).name,
                     self.default_root / "generated_documents" / clean_name,
                     self.default_root / Path(path).name,
                     self.default_root / clean_name,
-                    Path.home() / "Downloads" / Path(path).name,
-                    Path.home() / "Documents" / Path(path).name
+                    Path.home() / "Desktop" / Path(path).name,
+                    Path.home() / "Documents" / Path(path).name,
+                    Path.home() / "Downloads" / Path(path).name
                 ]
                 # Also search case-insensitively in generated_documents
                 gen_dir = self.default_root / "generated_documents"
@@ -245,21 +261,39 @@ class FileAgent:
                 else:
                     return {"success": False, "error": f"Path not found: {path}"}
 
-            os.startfile(str(p))
-            return {"success": True, "path": str(p), "message": f"Opened '{p.name}' in default Windows application."}
+            if reveal:
+                if p.is_dir():
+                    os.startfile(str(p))
+                else:
+                    subprocess.Popen(f'explorer.exe /select,"{p}"', shell=True)
+                return {"success": True, "path": str(p), "message": f"Revealed '{p.name}' in Windows File Explorer."}
+            else:
+                os.startfile(str(p))
+                return {"success": True, "path": str(p), "message": f"Opened '{p.name}' in default Windows application."}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_recent_files(self, limit: int = 10, sort_by: str = "date") -> Dict[str, Any]:
-        """Lists recent files with sorting by date, name, or size."""
+    def get_recent_files(self, limit: int = 10, sort_by: str = "date", directory: Optional[str] = None) -> Dict[str, Any]:
+        """Lists recent files with sorting by date, name, or size across workspace, desktop, and documents."""
         try:
+            from config import OUTPUT_DOCS_DIR
             search_dirs = [
+                Path.home() / "Desktop",
+                Path.home() / "Documents",
+                Path.home() / "Downloads",
+                Path.home() / "Pictures",
+                OUTPUT_DOCS_DIR,
                 self.default_root,
                 self.default_root / "generated_documents",
-                self.default_root / "scratch",
-                Path.home() / "Downloads"
+                self.default_root / "scratch"
             ]
+            if directory:
+                d_cand = Path(directory)
+                if d_cand.exists() and d_cand.is_dir():
+                    search_dirs.insert(0, d_cand)
+
             exclude_names = {".git", "__pycache__", ".venv", "node_modules", ".file_backups", ".system_generated"}
+            exclude_exts = {"ini", "tmp", "lnk", "lock", "log"}
             
             seen_paths = set()
             file_items = []
@@ -270,6 +304,9 @@ class FileAgent:
                 try:
                     for f in sdir.iterdir():
                         if f.is_file() and f.name not in exclude_names and not f.name.startswith("."):
+                            ext = f.suffix.lstrip(".").lower()
+                            if ext in exclude_exts or f.name.lower() == "desktop.ini":
+                                continue
                             res_p = str(f.resolve())
                             if res_p in seen_paths:
                                 continue
@@ -282,10 +319,32 @@ class FileAgent:
                                 "size_kb": round(stat.st_size / 1024, 1),
                                 "modified_ts": stat.st_mtime,
                                 "modified_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
-                                "extension": f.suffix.lstrip(".").lower()
+                                "extension": ext
                             })
                 except Exception:
                     pass
+
+            # Also query SQLite DB for any generated documents
+            try:
+                from db import list_generated_documents
+                for doc in list_generated_documents(limit=50):
+                    dp = Path(doc.get("file_path", ""))
+                    if dp.exists() and dp.is_file():
+                        res_p = str(dp.resolve())
+                        if res_p not in seen_paths:
+                            seen_paths.add(res_p)
+                            stat = dp.stat()
+                            file_items.append({
+                                "name": dp.name,
+                                "path": res_p,
+                                "size_bytes": stat.st_size,
+                                "size_kb": round(stat.st_size / 1024, 1),
+                                "modified_ts": stat.st_mtime,
+                                "modified_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                                "extension": dp.suffix.lstrip(".").lower()
+                            })
+            except Exception:
+                pass
 
             sort_mode = sort_by.lower()
             if sort_mode == "name":
