@@ -60,7 +60,7 @@ class LLMGateway:
         Bypasses OpenAI proxy bottlenecks and includes automatic model fallbacks.
         """
         api_key = settings.effective_api_key
-        models_to_try = [model, "gemini-flash-latest", "gemini-3.5-flash-lite"]
+        models_to_try = [model, "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
         unique_models = []
         for m in models_to_try:
             if m and m not in unique_models:
@@ -133,7 +133,7 @@ class LLMGateway:
         Multimodal screenshot reasoning using Google Gemini native vision API.
         """
         api_key = settings.effective_api_key
-        models_to_try = [model or self.vision_model, "gemini-flash-latest", "gemini-3.5-flash-lite"]
+        models_to_try = [model or self.vision_model, "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
         unique_models = []
         for m in models_to_try:
             if m and m not in unique_models:
