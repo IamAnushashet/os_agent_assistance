@@ -190,10 +190,10 @@ class SystemAgent:
                 os.startfile(exe)
             except Exception:
                 # 2. Interactive Console fallback for CLI shells
-                if k in ["cmd", "command prompt", "cmd.exe"]:
-                    subprocess.Popen("start cmd.exe", shell=True)
+                if k in ["cmd", "command prompt", "cmd.exe", "command"]:
+                    subprocess.Popen('start "Command Prompt" cmd.exe /k', shell=True)
                 elif k in ["powershell", "powershell.exe", "pwsh", "pwsh.exe"]:
-                    subprocess.Popen("start powershell.exe -NoExit", shell=True)
+                    subprocess.Popen('start "Windows PowerShell" powershell.exe -NoExit', shell=True)
                 else:
                     creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
                     subprocess.Popen(f'start "" "{exe}"', shell=True, creationflags=creation_flags)
@@ -207,16 +207,49 @@ class SystemAgent:
         """Waits for a desktop window containing title_substr to appear."""
         t0 = time.time()
         while time.time() - t0 < timeout:
-            for b in self.find_windows_by_title(title_substr):
-                user32.ShowWindow(b["hwnd"], 9)
-                user32.SetForegroundWindow(b["hwnd"])
-                return {"success": True, "hwnd": b["hwnd"], "title": b["title"]}
+            wins = self.find_windows_by_title(title_substr)
+            if wins:
+                hwnd = wins[0]["hwnd"]
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                return {"success": True, "hwnd": hwnd, "title": wins[0]["title"]}
             time.sleep(0.3)
+
+        # Fallback: Check if active foreground window can be utilized
+        fg = user32.GetForegroundWindow()
+        if fg:
+            length = user32.GetWindowTextLengthW(fg)
+            if length > 0:
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(fg, buff, length + 1)
+                fg_title = buff.value
+                return {
+                    "success": True,
+                    "hwnd": fg,
+                    "title": fg_title,
+                    "warning": f"Exact title '{title_substr}' not found, but foreground window '{fg_title}' is active."
+                }
+
         return {"success": False, "error": f"Window with title matching '{title_substr}' did not appear within {timeout}s."}
 
     def find_windows_by_title(self, query: str) -> List[Dict[str, Any]]:
         results = []
-        q_lower = query.lower()
+        q_lower = query.lower().strip()
+        candidates = {q_lower}
+        if any(c in q_lower for c in ["cmd", "command prompt", "command", "cmd.exe", "dos"]):
+            candidates.update(["command prompt", "cmd", "cmd.exe", "c:\\windows\\system32\\cmd.exe", "terminal", "windows terminal", "conhost"])
+        elif any(c in q_lower for c in ["powershell", "pwsh"]):
+            candidates.update(["powershell", "pwsh", "terminal", "windows terminal"])
+        elif any(c in q_lower for c in ["calc", "calculator"]):
+            candidates.update(["calculator", "calc"])
+        elif any(c in q_lower for c in ["notepad", "note"]):
+            candidates.update(["notepad", "untitled - notepad"])
+        elif any(c in q_lower for c in ["chrome", "google chrome"]):
+            candidates.update(["chrome", "google chrome"])
+        elif any(c in q_lower for c in ["edge", "microsoft edge"]):
+            candidates.update(["edge", "microsoft edge"])
+        elif any(c in q_lower for c in ["brave"]):
+            candidates.update(["brave"])
 
         def enum_cb(hwnd, lparam):
             if user32.IsWindowVisible(hwnd):
@@ -225,22 +258,51 @@ class SystemAgent:
                     buff = ctypes.create_unicode_buffer(length + 1)
                     user32.GetWindowTextW(hwnd, buff, length + 1)
                     t = buff.value
-                    if q_lower in t.lower():
+                    t_lower = t.lower()
+                    if any(cand in t_lower for cand in candidates):
                         results.append({"hwnd": hwnd, "title": t})
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+        cb = WNDENUMPROC(enum_cb)
+
+        # 1. Primary: EnumDesktopWindows via OpenInputDesktop (handles async threads & background workers)
+        try:
+            h_desk = user32.OpenInputDesktop(0, False, 0x0100)
+            if not h_desk:
+                h_desk = user32.GetThreadDesktop(ctypes.windll.kernel32.GetCurrentThreadId())
+            if h_desk:
+                user32.EnumDesktopWindows.argtypes = [wintypes.HANDLE, WNDENUMPROC, wintypes.LPARAM]
+                user32.EnumDesktopWindows.restype = wintypes.BOOL
+                user32.EnumDesktopWindows(h_desk, cb, 0)
+        except Exception:
+            pass
+
+        # 2. Fallback: EnumWindows
+        if not results:
+            try:
+                user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
+                user32.EnumWindows.restype = wintypes.BOOL
+                user32.EnumWindows(cb, 0)
+            except Exception:
+                pass
+
         return results
 
     def type_into_window(self, text: str, title_substr: Optional[str] = None) -> Dict[str, Any]:
         if title_substr:
             wins = self.find_windows_by_title(title_substr)
             if wins:
-                user32.ShowWindow(wins[0]["hwnd"], 9)
-                user32.SetForegroundWindow(wins[0]["hwnd"])
-                time.sleep(0.2)
-        controller.type_text(text)
+                hwnd = wins[0]["hwnd"]
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                time.sleep(0.3)
+        has_enter = text.endswith("\n")
+        clean_text = text.rstrip("\r\n") if has_enter else text
+        controller.type_text(clean_text)
+        if has_enter:
+            time.sleep(0.1)
+            controller.press_key("enter")
         return {"success": True, "chars_typed": len(text), "message": f"Typed text into active window."}
 
     def check_battery(self) -> Dict[str, Any]:
