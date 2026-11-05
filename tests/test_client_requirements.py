@@ -415,3 +415,58 @@ def test_file_open_reveal_in_explorer_and_index_resolution(monkeypatch):
     assert res2["success"] is True
     assert len(spawned_cmds) == 1
     assert "explorer.exe /select" in spawned_cmds[0]
+
+
+def test_browser_play_media_and_youtube_line_wise_workflow(monkeypatch):
+    """Verify line-wise YouTube media playback and single-tab execution."""
+    from semantic_planner import semantic_planner
+    from agents.browser_agent import browser_agent
+
+    # 1. Test fallback planner formulates browser_play_media for YouTube prompts
+    plan = semantic_planner._rule_based_fallback("open youtube and play despacito")
+    assert len(plan.steps) == 1
+    assert plan.steps[0].tool_name == "browser_play_media"
+    assert plan.steps[0].params["query"] == "despacito"
+    assert plan.steps[0].params["platform"] == "youtube"
+
+    # 2. Test play_media when YouTube is already open (in-app search)
+    recorded_actions = []
+    fake_browser = [{
+        "hwnd": 9999,
+        "title": "YouTube - Google Chrome",
+        "type": "Chrome",
+        "process": "chrome.exe",
+        "pid": 1234,
+        "rect": {"left": 0, "top": 0, "width": 800, "height": 600}
+    }]
+
+    monkeypatch.setattr(browser_agent, "find_existing_browsers", lambda: fake_browser)
+    monkeypatch.setattr(browser_agent, "focus_browser", lambda hwnd: recorded_actions.append(f"focus_{hwnd}"))
+    from agents.browser_agent import controller
+    monkeypatch.setattr(controller, "press_key", lambda k: recorded_actions.append(f"key_{k}"))
+    monkeypatch.setattr(controller, "hotkey", lambda *args: recorded_actions.append(f"hotkey_{args}"))
+    monkeypatch.setattr(controller, "type_text", lambda t: recorded_actions.append(f"type_{t}"))
+
+    import asyncio
+    res = asyncio.run(browser_agent.play_media("despacito"))
+    assert res["success"] is True
+    assert res["mode"] == "in_app_search"
+    assert "focus_9999" in recorded_actions
+    assert "key_/" in recorded_actions
+    assert "type_despacito" in recorded_actions
+    assert "key_enter" in recorded_actions
+
+    # 3. Test play_media when YouTube is not yet open (direct single-tab navigation)
+    recorded_actions.clear()
+    nav_urls = []
+    monkeypatch.setattr(browser_agent, "find_existing_browsers", lambda: [])
+    async def fake_nav(url, **kwargs):
+        nav_urls.append(url)
+        return {"success": True, "url": url}
+    monkeypatch.setattr(browser_agent, "navigate", fake_nav)
+
+    res2 = asyncio.run(browser_agent.play_media("believer"))
+    assert res2["success"] is True
+    assert res2["mode"] == "direct_single_tab"
+    assert len(nav_urls) == 1
+    assert "https://www.youtube.com/results?search_query=believer" in nav_urls[0]

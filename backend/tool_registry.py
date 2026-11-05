@@ -93,12 +93,26 @@ class ToolRegistry:
         self.register(ToolDefinition(
             name="browser_search",
             agent="Browser Agent",
-            description="Performs web search using Google or Bing in the existing browser.",
+            description="Performs web search using Google, YouTube, or Bing in the existing browser.",
             parameters={"query": {"type": "string"}, "engine": {"type": "string", "default": "google"}},
             category=ActionCategory.BROWSER_ACTION.value,
             risk_level=RiskLevel.LOW.value,
             handler=browser_agent.search,
             completion_criterion="Search page loaded in browser."
+        ))
+
+        self.register(ToolDefinition(
+            name="browser_play_media",
+            agent="Browser Agent",
+            description="Plays songs, music, or videos on YouTube. If YouTube is already open, searches directly within the active YouTube tab without opening new tabs. If not open, opens directly to search results in a single tab and initiates playback.",
+            parameters={
+                "query": {"type": "string", "description": "Song title, artist, or video name to search and play"},
+                "platform": {"type": "string", "default": "youtube", "description": "Target platform (default 'youtube')"}
+            },
+            category=ActionCategory.BROWSER_ACTION.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=browser_agent.play_media,
+            completion_criterion="Media playback initiated on YouTube."
         ))
 
         self.register(ToolDefinition(

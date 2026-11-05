@@ -91,7 +91,12 @@ class BrowserAgent:
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+        hdesktop = user32.OpenInputDesktop(0, False, 0x01FF) if hasattr(user32, 'OpenInputDesktop') else None
+        if hdesktop:
+            user32.EnumDesktopWindows(hdesktop, WNDENUMPROC(enum_cb), 0)
+            user32.CloseDesktop(hdesktop)
+        if not browsers:
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
         return browsers
 
     def get_primary_browser(self) -> Optional[Dict[str, Any]]:
@@ -233,18 +238,95 @@ class BrowserAgent:
             "message": f"Navigated to {url} in a new browser tab"
         }
 
-    async def search(self, query: str, engine: str = "google", hwnd: Optional[int] = None) -> Dict[str, Any]:
-        """Performs web search in a brand new browser tab."""
+    async def search(self, query: str, engine: str = "google", hwnd: Optional[int] = None, in_new_tab: bool = True) -> Dict[str, Any]:
+        """Performs web or media search in a browser tab."""
         import urllib.parse
         encoded = urllib.parse.quote(query)
-        if engine == "bing":
+        eng_lower = str(engine).lower()
+        if eng_lower in ["youtube", "yt"]:
+            url = f"https://www.youtube.com/results?search_query={encoded}"
+        elif eng_lower == "bing":
             url = f"https://www.bing.com/search?q={encoded}"
-        elif engine == "duckduckgo":
+        elif eng_lower == "duckduckgo":
             url = f"https://duckduckgo.com/?q={encoded}"
         else:
             url = f"https://www.google.com/search?q={encoded}"
-        res = await self.navigate(url, hwnd=hwnd, in_new_tab=True)
+        res = await self.navigate(url, hwnd=hwnd, in_new_tab=in_new_tab)
         res["query"] = query
+        res["engine"] = engine
+        return res
+
+    async def play_media(
+        self,
+        query: str,
+        platform: str = "youtube",
+        hwnd: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Plays songs, music, or videos on YouTube or specified media platform.
+        Line-wise execution:
+        - If YouTube is already open in an existing browser tab/window, focuses it,
+          activates in-page search directly via '/' shortcut, types query, submits, and plays the top result.
+        - If YouTube is not yet open, navigates directly to the YouTube search results in ONE tab and starts playback.
+        Eliminates the disjointed 2-tab behavior.
+        """
+        import urllib.parse
+        clean_query = query.strip()
+        encoded = urllib.parse.quote(clean_query)
+
+        # 1. Check if an existing browser window already has YouTube open
+        browsers = self.find_existing_browsers()
+        yt_browser = None
+        for b in browsers:
+            if "youtube" in b.get("title", "").lower():
+                yt_browser = b
+                break
+
+        if yt_browser:
+            target_hwnd = yt_browser["hwnd"]
+            self.focus_browser(target_hwnd)
+            await asyncio.sleep(0.3)
+
+            # In YouTube web application, '/' focuses the in-page search bar
+            controller.press_key("/")
+            await asyncio.sleep(0.2)
+
+            # Select any existing text in search box and type new query
+            controller.hotkey("ctrl", "a")
+            await asyncio.sleep(0.05)
+            controller.type_text(clean_query)
+            await asyncio.sleep(0.1)
+            controller.press_key("enter")
+            await asyncio.sleep(1.8)
+
+            # Play the first result
+            controller.press_key("enter")
+            await asyncio.sleep(0.5)
+
+            return {
+                "success": True,
+                "action": "browser_play_media",
+                "platform": platform,
+                "query": clean_query,
+                "mode": "in_app_search",
+                "browser_title": yt_browser.get("title", ""),
+                "message": f"Searched and played '{clean_query}' directly inside already opened YouTube tab."
+            }
+
+        # 2. YouTube is not yet open: navigate directly to search results in 1 single tab
+        yt_search_url = f"https://www.youtube.com/results?search_query={encoded}"
+        res = await self.navigate(yt_search_url, hwnd=hwnd, in_new_tab=True)
+        await asyncio.sleep(1.8)
+
+        # Hit Enter to start playback of the first video result
+        controller.press_key("enter")
+        await asyncio.sleep(0.5)
+
+        res["action"] = "browser_play_media"
+        res["platform"] = platform
+        res["query"] = clean_query
+        res["mode"] = "direct_single_tab"
+        res["message"] = f"Navigated to YouTube for '{clean_query}' in a single tab and initiated playback."
         return res
 
     async def scroll(self, direction: str = "down", amount: float = 3.0, hwnd: Optional[int] = None) -> Dict[str, Any]:

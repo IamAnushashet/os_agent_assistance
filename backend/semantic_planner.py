@@ -1119,6 +1119,33 @@ if __name__ == "__main__":
             ))
             return SemanticPlan(goal="Browser Login Assistance", strategy="Browser Automation", steps=steps)
 
+        # Case 1AA: YouTube & Media Playback (Song / Music / Video)
+        is_media_playback = ("youtube" in p_lower and any(w in p_lower for w in ["play", "song", "music", "video", "search", "listen"])) or (
+            "play" in p_lower and any(m in p_lower for m in ["song", "music", "despacito", "track", "audio", "video", "yt", "spotify"])
+        )
+        if is_media_playback:
+            clean_query = prompt
+            clean_query = re.sub(r"^(?:please\s+)?(?:open\s+youtube\s+(?:and\s+)?|launch\s+youtube\s+(?:and\s+)?|go\s+to\s+youtube\s+(?:and\s+)?|on\s+youtube\s+)?(?:play|search\s+for|search|listen\s+to)\s+", "", clean_query, flags=re.IGNORECASE)
+            clean_query = re.sub(r"\s*(?:on|in)\s+youtube\s*$", "", clean_query, flags=re.IGNORECASE)
+            clean_query = re.sub(r"^(?:this\s+song|a\s+song|song|music|video)\s*", "", clean_query, flags=re.IGNORECASE).strip()
+            if not clean_query:
+                clean_query = "popular songs"
+
+            tool = tool_registry.get("browser_play_media")
+            if tool:
+                steps.append(PlanStep(
+                    step_number=1,
+                    title=f"Play '{clean_query}' on YouTube",
+                    agent=tool.agent,
+                    tool_name=tool.name,
+                    params={"query": clean_query, "platform": "youtube"},
+                    category=tool.category,
+                    risk_level=tool.risk_level,
+                    reason="Play media directly on YouTube (in active tab if already open, or single new tab)",
+                    expected_outcome=f"Playback for '{clean_query}' initiated on YouTube"
+                ))
+                return SemanticPlan(goal=f"Play '{clean_query}' on YouTube", strategy="Media Playback", steps=steps)
+
         # Case 1A: Direct URL Navigation
         if re.search(r"^(?:https?:\/\/|[a-zA-Z0-9\-]+\.(?:com|org|net|edu|gov|io|ai|dev|co))", p_lower) or any(d in p_lower for d in ["youtube.com", "google.com", "github.com", "reddit.com", "wikipedia.org"]):
             url_match = re.search(r"(?:https?:\/\/[^\s]+|[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(?:\/[^\s]*)?)", prompt)
@@ -1387,7 +1414,10 @@ if __name__ == "__main__":
                 "     * Step 1 (Browser Agent): 'browser_search', Step 2 (File Agent): document generation, Step 3 (File Agent): 'file_open'.\n"
                 "   - When a user request asks to find an element on screen and click it:\n"
                 "     * Step 1 (Vision Agent): 'vision_locate_target', Step 2 (System Agent): 'system_mouse_click'.\n"
-                "   - When a user asks to open or reveal a file/document: use 'file_open'.\n\n"
+                "   - When a user asks to open or reveal a file/document: use 'file_open'.\n"
+                "   - When a user request asks to play music, songs, or videos on YouTube (e.g., 'open youtube and play X', 'play X on youtube', 'search X on youtube'):\n"
+                "     * Step 1 (Browser Agent): 'browser_play_media' with params {'query': '<song_or_video_name>', 'platform': 'youtube'}.\n"
+                "     * NEVER split this into separate browser_navigate to homepage followed by browser_search on google. 'browser_play_media' handles in-app search or single-tab playback directly!\n\n"
                 "6. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
                 "7. Output JSON ONLY.\n"
             )
