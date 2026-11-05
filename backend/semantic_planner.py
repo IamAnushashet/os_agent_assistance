@@ -374,14 +374,21 @@ if __name__ == "__main__":
     def _rule_based_fallback(self, prompt: str, chat_history: Optional[List[Dict[str, Any]]] = None) -> SemanticPlan:
         """Deterministic fallback planner when LLM API key is not configured or offline."""
         p_lower = prompt.lower()
+        # Extract command instruction without large quoted content payload
+        cmd_lower = re.sub(r'["\'][\s\S]{30,}["\']', '', prompt).strip().lower()
+        if not cmd_lower:
+            cmd_lower = p_lower
         steps: List[PlanStep] = []
 
         # Case 0-Show-Code: Show/display/give code in application/chat/here (Conversational Display)
-        is_display_in_app = (
-            any(w in p_lower for w in ["in application", "in app", "in chat", "here", "on screen", "in ui"])
-            and any(w in p_lower for w in ["give", "show", "display", "print", "view", "send", "paste"])
-            and any(w in p_lower for w in ["code", "script", "program", "it", "this"])
-        ) or p_lower.strip() in [
+        is_doc_or_file = bool(re.search(
+            r"\b(ppt|pptx|powerpoint|slides?|presentation|docx?|word|pdf|excel|xlsx?|csv|spreadsheet|create|make|generate|build|write to|save to)\b",
+            cmd_lower
+        ))
+        has_code_word = bool(re.search(r"\b(code|source code)\b", cmd_lower))
+        has_ui_dest = bool(re.search(r"\b(in application|in app|in chat|in ui|here in chat|directly in app)\b", cmd_lower))
+        has_display_verb = bool(re.search(r"\b(give|show|display|print|paste)\b", cmd_lower))
+        exact_code_phrases = {
             "give me the code in application",
             "give code in application",
             "show code in app",
@@ -390,7 +397,11 @@ if __name__ == "__main__":
             "display code here",
             "show me the code",
             "give me the code"
-        ]
+        }
+        is_display_in_app = not is_doc_or_file and (
+            (has_code_word and has_ui_dest and has_display_verb)
+            or cmd_lower in exact_code_phrases
+        )
         if is_display_in_app:
             last_code = ""
             lang = "cpp"
@@ -644,7 +655,11 @@ if __name__ == "__main__":
                 return SemanticPlan(goal=f"Extract and summarize attached document {source_path}", strategy="Document Content Summarization", steps=steps)
 
         # Case 0-Pre: File / Folder Conversion
-        if any(w in p_lower for w in ["convert", "conversion", "transform"]) or (("to word" in p_lower or "to excel" in p_lower or "to ppt" in p_lower or "to pdf" in p_lower) and ("pdf" in p_lower or "file" in p_lower or "folder" in p_lower or "attached" in p_lower)):
+        is_convert_cmd = bool(re.search(r"\b(convert|conversion)\b", cmd_lower)) or (
+            any(w in cmd_lower for w in ["to word", "to excel", "to ppt", "to pdf"])
+            and any(w in cmd_lower for w in ["pdf", "file", "folder", "attached"])
+        )
+        if is_convert_cmd:
             target_fmt = "docx"
             if "excel" in p_lower or "xlsx" in p_lower or "sheet" in p_lower:
                 target_fmt = "xlsx"
@@ -689,7 +704,17 @@ if __name__ == "__main__":
             return SemanticPlan(goal=f"Convert {source_path} to {target_fmt.upper()}", strategy="Document Format Conversion", steps=steps)
 
         # Case 0-Code: Application / Code / Script Creation
-        if any(w in p_lower for w in ["calculator", "calc", "app", "script", "code", "program", "utility"]) and any(w in p_lower for w in ["create", "make", "build", "write", "generate", "store", "save", "develop"]):
+        is_pptx_req = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", cmd_lower))
+        is_docx_req = bool(re.search(r"\b(docx|word|word doc|word document)\b", cmd_lower))
+        is_xlsx_req = bool(re.search(r"\b(excel|xlsx|spreadsheet|sheet)\b", cmd_lower))
+        is_pdf_req = bool(re.search(r"\b(pdf|pdf report)\b", cmd_lower))
+
+        is_code_creation = (
+            not is_pptx_req and not is_docx_req and not is_xlsx_req and not is_pdf_req
+            and bool(re.search(r"\b(calculator|calc|script|python script|c\+\+|cpp|coding|software|utility)\b", cmd_lower))
+            and any(w in cmd_lower for w in ["create", "make", "build", "write", "generate", "store", "save", "develop"])
+        )
+        if is_code_creation:
             is_calc = "calculator" in p_lower or "calc" in p_lower
 
             # Extract destination path if provided
@@ -884,22 +909,64 @@ if __name__ == "__main__":
             )
 
         # Case 0A: PowerPoint Presentation Generation
-        is_pptx = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", p_lower))
+        is_pptx = bool(re.search(r"\b(ppt|pptx|powerpoint|presentation|slides|deck)\b", cmd_lower))
         if is_pptx:
-            topic_match = re.search(r"(?:on|about|for|named|titled)\s+([a-zA-Z0-9_\s\-]+)", prompt, flags=re.IGNORECASE)
-            if topic_match:
-                topic = topic_match.group(1).strip()
+            content_match = re.search(r'["\']([\s\S]{30,})["\']', prompt)
+            custom_slides = None
+            topic = "Executive Presentation"
+            if content_match:
+                raw_content = content_match.group(1).strip()
+                paragraphs = [p.strip() for p in re.split(r'\n\s*\n', raw_content) if len(p.strip()) > 20]
+                if paragraphs:
+                    first_p = paragraphs[0]
+                    first_sent = first_p.split('.')[0]
+                    if "india" in first_sent.lower():
+                        topic = "India"
+                    elif len(first_sent) < 45:
+                        topic = first_sent
+                    else:
+                        topic = "Overview & Key Insights"
+
+                    custom_slides = [{"title": f"{topic}", "subtitle": "Comprehensive Overview & Analysis"}]
+                    section_titles = [
+                        "Geography, Regional Borders & Global Position",
+                        "Ancient Civilisation & Cultural Foundations",
+                        "Medieval Dynasties to National Independence",
+                        "Modern Democratic Republic & Economic Growth",
+                        "Strategic Overview & Key Insights"
+                    ]
+                    for idx_p, p_text in enumerate(paragraphs[:5]):
+                        s_title = section_titles[idx_p] if idx_p < len(section_titles) else f"Key Insights — Part {idx_p+1}"
+                        sents = [s.strip() for s in re.split(r'\.\s+', p_text) if len(s.strip()) > 15]
+                        bullets = [s[:120] + ("." if not s.endswith(".") else "") for s in sents[1:5]] if len(sents) > 1 else [p_text[:150]]
+                        custom_slides.append({
+                            "title": s_title,
+                            "cards": [{
+                                "title": "Core Subject Overview",
+                                "description": (sents[0] if sents else p_text)[:220],
+                                "points": bullets[:4]
+                            }]
+                        })
             else:
-                topic = re.sub(r"^(?:please\s+)?(?:create|make|generate|build)\s+(?:a\s+|an\s+)?(?:powerpoint|presentation|slides|pptx|ppt|deck)\s*(?:on|about|for|named|titled)?\s*", "", prompt, flags=re.IGNORECASE).strip() or "Executive Summary"
-            
-            clean_filename = f"{topic.replace(' ', '_')[:30]}_Presentation.pptx"
+                topic_match = re.search(r"(?:on|about|for|named|titled)\s+([a-zA-Z0-9_\s\-]+)", prompt, flags=re.IGNORECASE)
+                if topic_match:
+                    topic = topic_match.group(1).strip()
+                else:
+                    topic = re.sub(r"^(?:please\s+)?(?:create|make|generate|build)\s+(?:a\s+|an\s+)?(?:powerpoint|presentation|slides|pptx|ppt|deck)\s*(?:on|about|for|named|titled)?\s*", "", prompt, flags=re.IGNORECASE).strip() or "Executive Summary"
+
+            clean_topic = re.sub(r"[^a-zA-Z0-9_\-]", "_", topic)[:25]
+            clean_filename = f"{clean_topic}_Presentation.pptx"
             tool = tool_registry.get("file_generate_presentation")
+            plan_params = {"topic": topic, "filename": clean_filename}
+            if custom_slides:
+                plan_params["slides_data"] = custom_slides
+
             steps.append(PlanStep(
                 step_number=1,
                 title=f"Generate PowerPoint Presentation: '{topic}'",
                 agent=tool.agent,
                 tool_name=tool.name,
-                params={"topic": topic, "filename": clean_filename},
+                params=plan_params,
                 category=tool.category,
                 risk_level=tool.risk_level,
                 reason="Create multi-slide widescreen presentation deck with structured cards and themes",
@@ -1219,11 +1286,18 @@ if __name__ == "__main__":
 
         # Direct conversational display for "give/show/print code in application/chat"
         p_lower = prompt.lower().strip()
-        is_display_in_app = (
-            any(w in p_lower for w in ["in application", "in app", "in chat", "here", "on screen", "in ui"])
-            and any(w in p_lower for w in ["give", "show", "display", "print", "view", "send", "paste"])
-            and any(w in p_lower for w in ["code", "script", "program", "it", "this"])
-        ) or p_lower in [
+        cmd_lower = re.sub(r'["\'][\s\S]{30,}["\']', '', prompt).strip().lower()
+        if not cmd_lower:
+            cmd_lower = p_lower
+
+        is_doc_or_file = bool(re.search(
+            r"\b(ppt|pptx|powerpoint|slides?|presentation|docx?|word|pdf|excel|xlsx?|csv|spreadsheet|create|make|generate|build|write to|save to)\b",
+            cmd_lower
+        ))
+        has_code_word = bool(re.search(r"\b(code|source code)\b", cmd_lower))
+        has_ui_dest = bool(re.search(r"\b(in application|in app|in chat|in ui|here in chat|directly in app)\b", cmd_lower))
+        has_display_verb = bool(re.search(r"\b(give|show|display|print|paste)\b", cmd_lower))
+        exact_code_phrases = {
             "give me the code in application",
             "give code in application",
             "show code in app",
@@ -1232,7 +1306,11 @@ if __name__ == "__main__":
             "display code here",
             "show me the code",
             "give me the code"
-        ]
+        }
+        is_display_in_app = not is_doc_or_file and (
+            (has_code_word and has_ui_dest and has_display_verb)
+            or cmd_lower in exact_code_phrases
+        )
         if is_display_in_app:
             return self._rule_based_fallback(prompt, chat_history=chat_history)
 
