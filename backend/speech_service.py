@@ -79,5 +79,49 @@ class SpeechService:
             logger.warning(f"Edge-TTS synthesis note: {e}")
             return None
 
+    async def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> Dict[str, Any]:
+        """
+        Transcribes speech audio into text using Google Gemini Multimodal Audio API.
+        Enables seamless STT across all browsers, mobile remotes, and desktop sessions.
+        """
+        import base64
+        import httpx
+        from config import settings
+
+        api_key = settings.effective_api_key
+        if not api_key:
+            return {"success": False, "error": "No API key configured for speech transcription.", "transcript": ""}
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        candidates = ["gemini-3.1-flash-lite", "gemini-3.5-transcribe", "gemini-3.5-flash"]
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": "Transcribe the spoken speech in this audio recording word for word. Return ONLY the transcribed text. If the audio is silent or contains no speech, return an empty string."},
+                    {"inlineData": {"mimeType": mime_type, "data": audio_b64}}
+                ]
+            }],
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000}
+        }
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for model in candidates:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                try:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        cands = data.get("candidates", [])
+                        if cands:
+                            parts = cands[0].get("content", {}).get("parts", [])
+                            text = "".join(p.get("text", "") for p in parts).strip()
+                            return {"success": True, "transcript": text, "model": model}
+                except Exception as e:
+                    logger.warning(f"Audio transcription attempt with {model} failed: {e}")
+                    continue
+
+        return {"success": False, "error": "Audio transcription unavailable.", "transcript": ""}
+
 
 speech_service = SpeechService()

@@ -274,3 +274,30 @@ def test_monitors_and_multi_screen_endpoints():
     assert shot_res.status_code == 200
     assert shot_res.headers["content-type"] == "image/jpeg"
     assert len(shot_res.content) > 100
+
+
+def test_speech_tts_and_transcribe_endpoints(monkeypatch):
+    """Validates Speech-to-Text (STT) and Text-to-Speech (TTS) endpoints."""
+    from speech_service import speech_service
+
+    # 1. Test TTS endpoint with mock audio
+    async def mock_tts(t, v=None):
+        return b"FAKE_MP3_AUDIO_BYTES"
+    monkeypatch.setattr(speech_service, "generate_speech_audio", mock_tts)
+    res_tts = client.post("/api/speech/tts", json={"text": "Test speech output"})
+    assert res_tts.status_code == 200
+    assert res_tts.content == b"FAKE_MP3_AUDIO_BYTES"
+
+    # 2. Test STT transcribe endpoint
+    async def mock_transcribe(audio_bytes, mime_type="audio/wav"):
+        return {"success": True, "transcript": "open youtube and play despacito", "model": "mock-stt"}
+    monkeypatch.setattr(speech_service, "transcribe_audio", mock_transcribe)
+
+    res_stt = client.post(
+        "/api/speech/transcribe",
+        files={"file": ("sample.wav", b"RIFF....WAVE", "audio/wav")}
+    )
+    assert res_stt.status_code == 200
+    stt_data = res_stt.json()
+    assert stt_data["success"] is True
+    assert stt_data["transcript"] == "open youtube and play despacito"

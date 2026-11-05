@@ -855,6 +855,20 @@ async def tts_endpoint(req: Dict[str, Any]):
     return Response(content=audio, media_type="audio/mpeg")
 
 
+@app.post("/api/speech/transcribe")
+async def transcribe_endpoint(file: UploadFile = File(...)):
+    """
+    Transcribes uploaded speech audio recording (WAV, MP3, WEBM, M4A) into text.
+    Provides server-side STT fallback for all desktop and mobile remote clients.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Audio file is empty.")
+    mime_type = file.content_type or "audio/wav"
+    res = await speech_service.transcribe_audio(content, mime_type=mime_type)
+    return res
+
+
 # ----------------- SETTINGS -----------------
 
 @app.post("/api/settings")

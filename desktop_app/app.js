@@ -2476,9 +2476,17 @@ function setupEventListeners() {
       submitPrompt(transcript);
     };
 
-    recognizer.onerror = () => {
+    recognizer.onerror = (evt) => {
       btnMic.classList.remove('active');
       isListening = false;
+      const err = evt && evt.error ? evt.error : 'unknown';
+      if (err === 'not-allowed') {
+        showToast('Microphone access denied. Please enable microphone permissions in Windows Settings.', 'error');
+      } else if (err === 'no-speech') {
+        showToast('No speech detected. Please speak into your microphone.', 'info');
+      } else {
+        showToast(`Speech recognition error (${err}).`, 'warning');
+      }
     };
   }
 }
