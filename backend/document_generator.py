@@ -119,6 +119,30 @@ class DocumentGenerator:
         if not target.is_absolute():
             target = (self.output_dir / target).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check if target file already exists and is locked by an active application (e.g. PowerPoint, Word, Excel, Acrobat)
+        if target.exists():
+            try:
+                with open(target, "r+b"):
+                    pass
+            except (PermissionError, OSError):
+                stem = target.stem
+                parent = target.parent
+                for i in range(2, 100):
+                    candidate = parent / f"{stem}_v{i}{ext}"
+                    try:
+                        if candidate.exists():
+                            with open(candidate, "r+b"):
+                                pass
+                        target = candidate
+                        logger.warning(
+                            f"Target file '{filename}' is currently open and locked by an active program (PowerPoint/Office). "
+                            f"Auto-versioning output to '{target.name}'."
+                        )
+                        break
+                    except (PermissionError, OSError):
+                        continue
+
         return target
 
     # =========================================================================
@@ -371,7 +395,23 @@ class DocumentGenerator:
             p_ft.font.size = Pt(8.5)
             p_ft.font.color.rgb = c_text_muted
 
-        prs.save(str(out_path))
+        try:
+            prs.save(str(out_path))
+        except (PermissionError, OSError):
+            stem = out_path.stem
+            ext = out_path.suffix
+            parent = out_path.parent
+            for i in range(2, 100):
+                candidate = parent / f"{stem}_v{i}{ext}"
+                try:
+                    prs.save(str(candidate))
+                    out_path = candidate
+                    logger.warning(f"File locked during save. Saved presentation as '{out_path.name}'.")
+                    break
+                except (PermissionError, OSError):
+                    continue
+            else:
+                raise
         file_size = out_path.stat().st_size
 
         doc_id = f"doc-pptx-{uuid.uuid4().hex[:8]}"
@@ -766,7 +806,23 @@ class DocumentGenerator:
                 p_sp = doc.add_paragraph()
                 p_sp.paragraph_format.space_after = DocxPt(8)
 
-        doc.save(str(out_path))
+        try:
+            doc.save(str(out_path))
+        except (PermissionError, OSError):
+            stem = out_path.stem
+            ext = out_path.suffix
+            parent = out_path.parent
+            for i in range(2, 100):
+                candidate = parent / f"{stem}_v{i}{ext}"
+                try:
+                    doc.save(str(candidate))
+                    out_path = candidate
+                    logger.warning(f"File locked during save. Saved Word document as '{out_path.name}'.")
+                    break
+                except (PermissionError, OSError):
+                    continue
+            else:
+                raise
         file_size = out_path.stat().st_size
         doc_id = f"doc-docx-{uuid.uuid4().hex[:8]}"
 
@@ -879,7 +935,23 @@ class DocumentGenerator:
                 col_letter = get_column_letter(col[0].column)
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
 
-        wb.save(str(out_path))
+        try:
+            wb.save(str(out_path))
+        except (PermissionError, OSError):
+            stem = out_path.stem
+            ext = out_path.suffix
+            parent = out_path.parent
+            for i in range(2, 100):
+                candidate = parent / f"{stem}_v{i}{ext}"
+                try:
+                    wb.save(str(candidate))
+                    out_path = candidate
+                    logger.warning(f"File locked during save. Saved spreadsheet as '{out_path.name}'.")
+                    break
+                except (PermissionError, OSError):
+                    continue
+            else:
+                raise
         file_size = out_path.stat().st_size
         doc_id = f"doc-xlsx-{uuid.uuid4().hex[:8]}"
 

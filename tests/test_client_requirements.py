@@ -470,3 +470,32 @@ def test_browser_play_media_and_youtube_line_wise_workflow(monkeypatch):
     assert res2["mode"] == "direct_single_tab"
     assert len(nav_urls) == 1
     assert "https://www.youtube.com/results?search_query=believer" in nav_urls[0]
+
+
+def test_locked_document_auto_versioning(tmp_path):
+    """Verify documents auto-version to _v2 when target file is locked by MS Office or Viewer."""
+    import ctypes
+    from document_generator import doc_generator
+
+    target_file = tmp_path / "locked_demo.pptx"
+    res1 = doc_generator.create_presentation("Initial Presentation", str(target_file))
+    assert res1["success"] is True
+    assert Path(res1["file_path"]).exists()
+
+    # Lock file exclusively simulating Microsoft PowerPoint
+    kernel32 = ctypes.windll.kernel32
+    GENERIC_READ = 0x80000000
+    FILE_SHARE_READ = 0x00000001
+    OPEN_EXISTING = 3
+    hfile = kernel32.CreateFileW(str(target_file), GENERIC_READ, FILE_SHARE_READ, None, OPEN_EXISTING, 0, None)
+    assert hfile != -1
+
+    try:
+        # Attempt to create presentation with same filename while file is locked
+        res2 = doc_generator.create_presentation("Updated Presentation", str(target_file))
+        assert res2["success"] is True
+        assert Path(res2["file_path"]).exists()
+        assert res2["file_path"] != str(target_file)
+        assert "locked_demo_v2.pptx" in res2["file_path"]
+    finally:
+        kernel32.CloseHandle(hfile)
