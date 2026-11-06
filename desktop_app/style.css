@@ -1387,7 +1387,7 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: var(--accent-primary);
+  background: #aaaaaa;
   border: none;
   color: white;
   font-size: 13px;
