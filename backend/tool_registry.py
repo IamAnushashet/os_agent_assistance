@@ -296,7 +296,11 @@ class ToolRegistry:
             parameters={
                 "topic": {"type": "string", "description": "Subject or topic of presentation"},
                 "filename": {"type": "string", "optional": True},
-                "slides_data": {"type": "array", "optional": True},
+                "slides_data": {
+                    "type": "array",
+                    "optional": True,
+                    "description": "Structured slide objects: [{'title': str, 'subtitle': str, 'cards': [{'title': str, 'description': str, 'points': [str]}], 'table': {'headers': [str], 'rows': [[str]]}, 'bullets': [str]}]"
+                },
                 "theme": {"type": "string", "default": "cyber_sapphire"},
                 "task_id": {"type": "string", "optional": True}
             },

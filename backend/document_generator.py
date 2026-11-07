@@ -307,14 +307,68 @@ class DocumentGenerator:
             line.fill.fore_color.rgb = c_card_border
             line.line.fill.background()
 
-            # Render Cards Layout
+            # Render Cards, Table, or Content Layout
             cards = sdata.get("cards", [])
             bullets = sdata.get("bullets", [])
+            table_data = sdata.get("table") or sdata.get("matrix")
+            content_raw = sdata.get("content", "")
 
-            if cards:
-                # 2, 3 or 4 Column Bento Cards
-                num_cards = min(len(cards), 3)
-                gap = Inches(0.3)
+            # Auto-parse unstructured text if structured cards/bullets are absent
+            if not cards and not bullets and not table_data and content_raw:
+                content_text = str(content_raw).strip()
+                item_pattern = re.compile(r'(?:^|\n)\s*(\d+)\.\s+([^\n:]+):?\s*([\s\S]*?)(?=(?:\n\s*\d+\.|\Z))')
+                matches = item_pattern.findall(content_text)
+                if matches:
+                    for num, c_title, c_body in matches:
+                        lines = [l.strip() for l in c_body.strip().splitlines() if l.strip()]
+                        pts = [re.sub(r'^[\-\*•▸]\s*', '', l) for l in lines if l.startswith(('-', '*', '•', '▸'))]
+                        dsc = ' '.join(l for l in lines if not l.startswith(('-', '*', '•', '▸')))
+                        cards.append({
+                            "title": c_title.strip(),
+                            "description": dsc,
+                            "points": pts if pts else lines
+                        })
+                else:
+                    raw_lines = [l.strip() for l in content_text.splitlines() if l.strip()]
+                    for l in raw_lines:
+                        clean_l = re.sub(r'^[\-\*•▸]\s*', '', l).strip()
+                        if clean_l:
+                            bullets.append(clean_l)
+
+            if table_data and isinstance(table_data, dict) and "headers" in table_data and "rows" in table_data:
+                headers = table_data.get("headers", [])
+                rows = table_data.get("rows", [])
+                num_r = len(rows) + 1
+                num_c = len(headers)
+                t_w = Inches(11.5)
+                t_h = Inches(4.7)
+                tbl_shape = slide.shapes.add_table(num_r, num_c, Inches(0.9), Inches(2.1), t_w, t_h)
+                tbl = tbl_shape.table
+                for ci, h_txt in enumerate(headers):
+                    cell = tbl.cell(0, ci)
+                    cell.fill.solid()
+                    cell.fill.fore_color.rgb = c_card
+                    cp = cell.text_frame.paragraphs[0]
+                    cp.text = str(h_txt)
+                    cp.font.name = "Segoe UI"
+                    cp.font.size = Pt(11)
+                    cp.font.bold = True
+                    cp.font.color.rgb = c_accent
+                for ri, row_vals in enumerate(rows, start=1):
+                    for ci, val in enumerate(row_vals[:num_c]):
+                        cell = tbl.cell(ri, ci)
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = RGBColor(16, 22, 38) if ri % 2 == 1 else RGBColor(12, 17, 30)
+                        cp = cell.text_frame.paragraphs[0]
+                        cp.text = str(val)
+                        cp.font.name = "Segoe UI"
+                        cp.font.size = Pt(10)
+                        cp.font.color.rgb = c_text_muted
+
+            elif cards:
+                # 2, 3, 4, or 5 Column Bento Cards
+                num_cards = min(len(cards), 5)
+                gap = Inches(0.25) if num_cards >= 4 else Inches(0.3)
                 total_w = Inches(11.5)
                 card_w = (total_w - (gap * (num_cards - 1))) / num_cards
                 card_h = Inches(4.7)
@@ -333,26 +387,26 @@ class DocumentGenerator:
 
                     ctf = card_shape.text_frame
                     ctf.word_wrap = True
-                    ctf.margin_left = ctf.margin_right = Inches(0.25)
-                    ctf.margin_top = Inches(0.3)
+                    ctf.margin_left = ctf.margin_right = Inches(0.18) if num_cards >= 4 else Inches(0.25)
+                    ctf.margin_top = Inches(0.22)
 
                     # Card Badge
                     p_num = ctf.paragraphs[0]
                     p_num.text = f"0{c_i + 1}"
                     p_num.font.name = "Segoe UI"
-                    p_num.font.size = Pt(16)
+                    p_num.font.size = Pt(13) if num_cards >= 4 else Pt(16)
                     p_num.font.bold = True
                     p_num.font.color.rgb = c_accent
-                    p_num.space_after = Pt(8)
+                    p_num.space_after = Pt(6)
 
                     # Card Title
                     p_ctitle = ctf.add_paragraph()
                     p_ctitle.text = card.get("title", f"Pillar {c_i+1}")
                     p_ctitle.font.name = "Segoe UI"
-                    p_ctitle.font.size = Pt(16)
+                    p_ctitle.font.size = Pt(12) if num_cards >= 4 else Pt(15)
                     p_ctitle.font.bold = True
                     p_ctitle.font.color.rgb = c_text_main
-                    p_ctitle.space_after = Pt(12)
+                    p_ctitle.space_after = Pt(8)
 
                     # Card Description / Points
                     desc = card.get("description", "")
@@ -360,15 +414,15 @@ class DocumentGenerator:
                         p_cdesc = ctf.add_paragraph()
                         p_cdesc.text = desc
                         p_cdesc.font.name = "Segoe UI"
-                        p_cdesc.font.size = Pt(11.5)
+                        p_cdesc.font.size = Pt(9.5) if num_cards >= 4 else Pt(11)
                         p_cdesc.font.color.rgb = c_text_muted
-                        p_cdesc.space_after = Pt(8)
+                        p_cdesc.space_after = Pt(6)
 
                     for point in card.get("points", []):
                         p_p = ctf.add_paragraph()
                         p_p.text = f"• {point}"
                         p_p.font.name = "Segoe UI"
-                        p_p.font.size = Pt(11)
+                        p_p.font.size = Pt(9) if num_cards >= 4 else Pt(10.5)
                         p_p.font.color.rgb = c_text_muted
                         p_p.space_after = Pt(4)
 
