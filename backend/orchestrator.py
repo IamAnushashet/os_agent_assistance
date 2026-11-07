@@ -28,6 +28,7 @@ from permission_engine import permission_engine, PermissionDecision, ActionCateg
 from tool_registry import tool_registry
 from semantic_planner import semantic_planner
 from speech_service import speech_service
+from llm_gateway import llm_gateway
 from config import PROJECT_ROOT, settings
 
 logger = logging.getLogger("orchestrator")
@@ -484,6 +485,21 @@ class MultiAgentOrchestrator:
                     out = res.get("stdout", "").strip()
                     summary_parts.append(f"**Command Output:**\n```powershell\n{out}\n```")
 
+                elif "entries" in res or tool_name == "file_list_dir":
+                    entries = res.get("entries", [])
+                    dir_path = res.get("path", "")
+                    if entries:
+                        dirs = [e["name"] for e in entries if e.get("is_dir")]
+                        files = [e["name"] for e in entries if not e.get("is_dir")]
+                        l_parts = [f"### 📂 Directory Contents: `{dir_path}`\n"]
+                        if dirs:
+                            l_parts.append("**Directories:**\n" + "\n".join(f"- 📁 `{d}/`" for d in sorted(dirs)))
+                        if files:
+                            l_parts.append("\n**Files:**\n" + "\n".join(f"- 📄 `{f}`" for f in sorted(files)))
+                        summary_parts.append("\n".join(l_parts))
+                    elif msg:
+                        summary_parts.append(msg)
+
                 elif msg:
                     summary_parts.append(msg)
 
@@ -495,7 +511,23 @@ class MultiAgentOrchestrator:
                     full_summary = " ".join(clean_parts) + "\n\n" + full_summary
                 spoken = f"Successfully generated and saved {len(code_displays)} code file to your Windows workspace."
             else:
-                full_summary = " ".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
+                full_summary = "\n\n".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
+                
+                # If prompt is an explanation/analysis query, synthesize with LLM Gateway
+                is_explanatory = any(w in prompt.lower() for w in ["explain", "describe", "what is", "how does", "architecture", "overview", "structure", "tell me about", "analyze", "break down"])
+                if is_explanatory:
+                    try:
+                        context_data = "\n\n".join(summary_parts) if summary_parts else ""
+                        synth_messages = [
+                            {"role": "system", "content": "You are the Autonomous Multi-Agent OS Assistant. The user asked an explanatory or analytical question about their system or repository. Provide a thorough, well-structured, professional technical explanation answering their query using the observed evidence and context. Use clean Markdown headings, bullet points, and code formatting."},
+                            {"role": "user", "content": f"User Request: {prompt}\n\nObserved Evidence / Workspace Data:\n{context_data}\n\nPlease provide a clear, comprehensive, and helpful explanation directly answering the user's request."}
+                        ]
+                        synth_resp = await llm_gateway.chat_complete(synth_messages)
+                        if synth_resp and synth_resp.get("content"):
+                            full_summary = synth_resp["content"].strip()
+                    except Exception as e:
+                        logger.warning(f"Synthesis call failed, falling back to raw summary: {e}")
+
                 spoken = speech_service.filter_text_for_speech(full_summary)
 
             # If any action created or converted a document, attach created_document directly to final_report
