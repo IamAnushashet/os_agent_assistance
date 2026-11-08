@@ -1848,17 +1848,17 @@ body {
    ========================================================================== */
 .floating-hud {
   position: fixed;
-  bottom: 20px;
+  bottom: 85px;
   left: 50%;
   transform: translateX(-50%);
   width: 580px;
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border-subtle);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
   border-radius: 8px;
   display: flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: 6px 12px;
   gap: 8px;
   z-index: 9999;
 }

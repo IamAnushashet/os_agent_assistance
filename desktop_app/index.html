@@ -211,45 +211,6 @@
 
             <div id="message-thread" class="message-thread"></div>
           </div>
-
-          <!-- Bottom Control & Prompt Bar -->
-          <footer class="bottom-dock">
-            <div class="permission-bar">
-              <div class="perm-selector-wrapper">
-                <span class="perm-icon">🛡️</span>
-                <span class="perm-label">GOVERNANCE MODE:</span>
-                <select id="select-permission-mode" class="perm-select">
-                  <option value="balanced" selected>Balanced (Safe Auto-Run, Prompt High-Risk)</option>
-                  <option value="full_access">Full Access (Auto-Execute All Non-Destructive)</option>
-                  <option value="ask_every_step">Ask Every Step (Strict Human Confirmation)</option>
-                  <option value="read_only">Read-Only (Inspect & Preview Only)</option>
-                </select>
-              </div>
-              <div class="perm-status" id="perm-status-indicator">
-                <span class="pulse-dot green"></span>
-                <span>Active Policy Enforced</span>
-              </div>
-            </div>
-
-            <!-- File Attachment Chip Bar (ChatGPT style) -->
-            <div id="attached-file-bar" class="attached-file-bar hidden">
-              <div class="attached-file-chip">
-                <span id="attached-file-icon">📎</span>
-                <span id="attached-file-name" class="attached-name">document.pdf</span>
-                <span id="attached-file-size" class="attached-size">0 KB</span>
-                <button type="button" id="btn-remove-attachment" class="btn-chip-remove" title="Remove attached file">✕</button>
-              </div>
-            </div>
-
-            <div class="input-glass-box">
-              <input type="file" id="file-input-attach" class="hidden" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.csv,.md,.png,.jpg,.jpeg">
-              <button type="button" id="btn-attach" class="btn-dock-attach" title="Attach file to analyze or convert (PDF, Word, Excel, PPTX, Images)">📎</button>
-              <button id="btn-mic" class="btn-dock-mic" title="Push to talk or toggle voice dictation">🎙️</button>
-              <textarea id="prompt-input" rows="1" placeholder="Instruct Nexus Agent (e.g. 'Create a presentation on Quantum Computing' or 'Check my running tabs')..."></textarea>
-              <button id="btn-send" class="btn-dock-send" title="Dispatch Instruction">➤</button>
-            </div>
-            <div class="dock-subtext">Option A Active • Zero-Setup Cloud API • Press Enter to Send • Esc to Cancel</div>
-          </footer>
         </div>
 
         <!-- 2. BROWSER AGENT TAB -->
@@ -544,18 +505,58 @@
             </div>
           </div>
         </div>
+
+        <!-- Permanent Bottom Control & Prompt Bar (Available across all tabs) -->
+        <footer class="bottom-dock">
+          <div class="permission-bar">
+            <div class="perm-selector-wrapper">
+              <span class="perm-icon">🛡️</span>
+              <span class="perm-label">GOVERNANCE MODE:</span>
+              <select id="select-permission-mode" class="perm-select">
+                <option value="balanced" selected>Balanced (Safe Auto-Run, Prompt High-Risk)</option>
+                <option value="full_access">Full Access (Auto-Execute All Non-Destructive)</option>
+                <option value="ask_every_step">Ask Every Step (Strict Human Confirmation)</option>
+                <option value="read_only">Read-Only (Inspect & Preview Only)</option>
+              </select>
+            </div>
+            <div class="perm-status" id="perm-status-indicator">
+              <span class="pulse-dot green"></span>
+              <span>Active Policy Enforced</span>
+            </div>
+          </div>
+
+          <!-- File Attachment Chip Bar (ChatGPT style) -->
+          <div id="attached-file-bar" class="attached-file-bar hidden">
+            <div class="attached-file-chip">
+              <span id="attached-file-icon">📎</span>
+              <span id="attached-file-name" class="attached-name">document.pdf</span>
+              <span id="attached-file-size" class="attached-size">0 KB</span>
+              <button type="button" id="btn-remove-attachment" class="btn-chip-remove" title="Remove attached file">✕</button>
+            </div>
+          </div>
+
+          <div class="input-glass-box">
+            <input type="file" id="file-input-attach" class="hidden" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.csv,.md,.png,.jpg,.jpeg">
+            <button type="button" id="btn-attach" class="btn-dock-attach" title="Attach file to analyze or convert (PDF, Word, Excel, PPTX, Images)">📎</button>
+            <button id="btn-mic" class="btn-dock-mic" title="Push to talk or toggle voice dictation">🎙️</button>
+            <textarea id="prompt-input" rows="1" placeholder="Instruct Nexus Agent (e.g. 'Create a presentation on Quantum Computing' or 'Check my running tabs')..."></textarea>
+            <button id="btn-send" class="btn-dock-send" title="Dispatch Instruction">➤</button>
+          </div>
+          <div class="dock-subtext">Option A Active • Zero-Setup Cloud API • Press Enter to Send • Esc to Cancel</div>
+        </footer>
       </main>
     </div>
   </div>
 
-  <!-- FLOATING HUD BAR OVERLAY (Can be shown on top of screen) -->
+  <!-- FLOATING HUD BAR OVERLAY (Can be shown on top of any tab) -->
   <div id="floating-hud-bar" class="floating-hud hidden">
-    <div class="hud-handle">:::</div>
+    <div class="hud-handle" title="Drag to reposition">:::</div>
     <div class="hud-badge">NEXUS HUD</div>
     <input type="text" id="hud-input" placeholder="Type instruction for Nexus OS Agent...">
-    <button id="hud-btn-mic" class="hud-icon-btn">🎙️</button>
-    <button id="hud-btn-send" class="hud-send-btn">➤</button>
-    <button id="hud-btn-close" class="hud-close-btn">✕</button>
+    <button id="hud-btn-mic" class="hud-icon-btn" title="Push to talk or toggle voice dictation">🎙️</button>
+    <button id="hud-btn-popout" class="hud-icon-btn" title="Pop out into Always-on-Top Multi-Screen Window">🗗</button>
+    <button id="hud-btn-send" class="hud-send-btn" title="Dispatch Instruction">➤</button>
+    <button id="hud-btn-close" class="hud-close-btn" title="Close Floating Searchbar">✕</button>
   </div>
 
   <!-- PHONE REMOTE LAN PAIRING MODAL -->

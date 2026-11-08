@@ -574,6 +574,7 @@ const floatingHudBar = document.getElementById('floating-hud-bar');
 const hudInput = document.getElementById('hud-input');
 const hudBtnSend = document.getElementById('hud-btn-send');
 const hudBtnMic = document.getElementById('hud-btn-mic');
+const hudBtnPopout = document.getElementById('hud-btn-popout');
 const hudBtnClose = document.getElementById('hud-btn-close');
 
 // Modals DOM
@@ -739,6 +740,18 @@ function makeElementDraggable(element, handle) {
   };
 }
 
+function toggleFloatingHud() {
+  if (!floatingHudBar) return;
+  const isHidden = floatingHudBar.classList.contains('hidden');
+  if (isHidden) {
+    floatingHudBar.classList.remove('hidden');
+    if (hudInput) hudInput.focus();
+    showToast('🪄 Floating HUD Searchbar active across all tabs', 'info');
+  } else {
+    floatingHudBar.classList.add('hidden');
+  }
+}
+
 function openFloatingHudWindow() {
   // If Document Picture-in-Picture is supported (Chrome 116+, Edge 116+)
   // it provides a REAL native Always-On-Top floating window across all screens!
@@ -862,6 +875,12 @@ async function submitPrompt(text) {
     fullPrompt = `[Attached file: ${currentAttachedFile.path}]\n${rawInput || "Convert this file or summarize its contents"}`;
     displayPrompt = `📎 ${currentAttachedFile.filename}\n${rawInput || "Convert this file or summarize its contents"}`;
     clearAttachedFile();
+  }
+
+  // Auto-switch to Console tab so user sees live execution cards and logs immediately
+  const consoleTab = document.querySelector('[data-tab="tab-console"]');
+  if (consoleTab && !consoleTab.classList.contains('active')) {
+    consoleTab.click();
   }
 
   welcomeCard.style.display = 'none';
@@ -2327,8 +2346,11 @@ function setupEventListeners() {
     }
   });
 
-  // HUD
-  btnToggleHud.addEventListener('click', openFloatingHudWindow);
+  // HUD & Floating Searchbar (Active across all tabs)
+  btnToggleHud.addEventListener('click', toggleFloatingHud);
+  if (hudBtnPopout) {
+    hudBtnPopout.addEventListener('click', openFloatingHudWindow);
+  }
   if (selectMonitor) {
     selectMonitor.addEventListener('change', refreshVisionPreview);
     loadMonitors();
@@ -2345,6 +2367,12 @@ function setupEventListeners() {
     if (e.key === 'Enter') {
       e.preventDefault();
       submitPrompt(hudInput.value);
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && floatingHudBar && !floatingHudBar.classList.contains('hidden')) {
+      floatingHudBar.classList.add('hidden');
     }
   });
 
