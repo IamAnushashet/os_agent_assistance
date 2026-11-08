@@ -286,7 +286,8 @@ class SystemAgent:
         q_lower = query.lower().strip()
         candidates = {q_lower}
         if any(c in q_lower for c in ["cmd", "command prompt", "command", "cmd.exe", "dos"]):
-            candidates.update(["command prompt", "cmd", "cmd.exe", "c:\\windows\\system32\\cmd.exe", "terminal", "windows terminal", "conhost"])
+            sys_cmd = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", "cmd.exe").lower()
+            candidates.update(["command prompt", "cmd", "cmd.exe", sys_cmd, "terminal", "windows terminal", "conhost"])
         elif any(c in q_lower for c in ["powershell", "pwsh"]):
             candidates.update(["powershell", "pwsh", "terminal", "windows terminal"])
         elif any(c in q_lower for c in ["calc", "calculator"]):
@@ -383,7 +384,10 @@ class SystemAgent:
 
     def run_command(self, command: str, timeout: float = 15.0) -> Dict[str, Any]:
         """Executes validated PowerShell command with safety restrictions."""
+        import re
         cmd_lower = command.lower()
+        if re.search(r"(?:rmdir|del|remove-item)\s+.*[a-z]:[\\/]", cmd_lower):
+            return {"success": False, "error": "Command rejected: contains blocked destructive root drive wipe pattern."}
         for blocked in BLOCKED_COMMAND_PATTERNS:
             if blocked in cmd_lower:
                 return {"success": False, "error": f"Command rejected: contains blocked destructive pattern '{blocked}'."}

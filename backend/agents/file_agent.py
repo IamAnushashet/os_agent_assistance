@@ -33,14 +33,53 @@ class FileAgent:
         else:
             resolved = candidate.resolve()
 
-        # Prevent operating on critical Windows directories
+        # Prevent operating on critical Windows directories dynamically across any drive letter
         sys_str = str(resolved).lower()
-        blocked_dirs = ["c:\\windows\\system32", "c:\\windows\\syswow64", "c:\\boot"]
+        win_root = os.environ.get("SystemRoot", "C:\\Windows").lower()
+        win_drive = Path(win_root).anchor.lower()
+        blocked_dirs = [
+            os.path.join(win_root, "system32").lower(),
+            os.path.join(win_root, "syswow64").lower(),
+            os.path.join(win_drive, "boot").lower()
+        ]
         for b in blocked_dirs:
             if sys_str.startswith(b):
                 raise PermissionError(f"Access to critical Windows system path '{resolved}' is strictly blocked.")
 
         return resolved
+
+    def _find_file_across_drives(self, filename: str, max_depth: int = 4) -> Optional[Path]:
+        """Performs a fast, pruned multi-drive search across all mounted drives for a given filename."""
+        import string
+        target_lower = Path(filename).name.lower()
+        skip_dirs = {
+            "windows", "program files", "program files (x86)", "$recycle.bin",
+            "system volume information", "node_modules", "venv", ".git", "appdata"
+        }
+        
+        drives = []
+        for d in string.ascii_uppercase:
+            p = Path(f"{d}:/")
+            if p.exists():
+                drives.append(str(p))
+                
+        for drive in drives:
+            try:
+                for root, dirs, files in os.walk(drive):
+                    rel = root[len(drive):].strip("\\/")
+                    depth = rel.count(os.sep) if rel else 0
+                    if depth > max_depth:
+                        dirs.clear()
+                        continue
+                    dirs[:] = [d for d in dirs if d.lower() not in skip_dirs]
+                    for f in files:
+                        if f.lower() == target_lower:
+                            found = Path(root) / f
+                            if found.exists() and found.is_file():
+                                return found
+            except Exception:
+                continue
+        return None
 
     def _create_backup(self, file_path: Path) -> Optional[Path]:
         """Creates a timestamped rollback backup in scratch/.file_backups/."""
@@ -73,7 +112,7 @@ class FileAgent:
                         matches.append({"name": f, "path": str(fp), "size": fp.stat().st_size})
                     elif len(matches) < max_results:
                         try:
-                            if fp.stat().st_size < 1_000_000:
+                            if fp.stat().st_size < 1_000_000 and fp.suffix.lower() not in [".db", ".sqlite", ".sqlite3", ".bin", ".exe", ".dll", ".pyd", ".iso"]:
                                 text = fp.read_text(encoding="utf-8", errors="ignore")
                                 if q_lower in text.lower():
                                     matches.append({"name": f, "path": str(fp), "size": fp.stat().st_size, "content_match": True})
@@ -83,6 +122,39 @@ class FileAgent:
                         break
                 if len(matches) >= max_results:
                     break
+
+            # If no exact or name match in default root, perform shallow search in user folders & mounted drive roots
+            has_name_match = any(q_lower in f.get("name", "").lower() for f in matches)
+            if not has_name_match and search_dir is None:
+                import string
+                fallback_dirs = [
+                    self.default_root.parent,
+                    Path.home() / "Desktop",
+                    Path.home() / "Documents",
+                    Path.home() / "Downloads",
+                ]
+                for d in string.ascii_uppercase:
+                    d_path = Path(f"{d}:/")
+                    if d_path.exists() and d_path != self.default_root:
+                        fallback_dirs.append(d_path)
+
+                for f_dir in fallback_dirs:
+                    if not f_dir.exists():
+                        continue
+                    try:
+                        for item in f_dir.iterdir():
+                            if item.is_file() and q_lower in item.name.lower():
+                                matches.append({"name": item.name, "path": str(item), "size": item.stat().st_size})
+                                if len(matches) >= max_results:
+                                    break
+                    except Exception:
+                        pass
+                    if len(matches) >= max_results:
+                        break
+
+                drive_found = self._find_file_across_drives(query)
+                if drive_found and not any(str(drive_found).lower() == f.get("path", "").lower() for f in matches):
+                    matches.insert(0, {"name": drive_found.name, "path": str(drive_found), "size": drive_found.stat().st_size})
 
             self.last_search_results = matches
             return {"success": True, "query": query, "total_found": len(matches), "files": matches}
@@ -228,10 +300,36 @@ class FileAgent:
                     self.default_root / "generated_documents" / clean_name,
                     self.default_root / Path(path).name,
                     self.default_root / clean_name,
+                    self.default_root.parent / Path(path).name,
+                    self.default_root.parent / clean_name,
+                    self.default_root.parent.parent / Path(path).name,
+                    self.default_root.parent.parent / clean_name,
                     Path.home() / "Desktop" / Path(path).name,
                     Path.home() / "Documents" / Path(path).name,
-                    Path.home() / "Downloads" / Path(path).name
+                    Path.home() / "Downloads" / Path(path).name,
+                    Path.home() / "Pictures" / Path(path).name,
+                    Path.home() / "Videos" / Path(path).name,
+                    Path.home() / "Music" / Path(path).name,
                 ]
+                # Check mounted drive roots (e.g. C:, D:, E:, F:)
+                import string
+                try:
+                    for d in string.ascii_uppercase:
+                        d_path = Path(f"{d}:/")
+                        if d_path.exists():
+                            cands.append(d_path / Path(path).name)
+                            cands.append(d_path / clean_name)
+                except Exception:
+                    pass
+                # Check immediate subdirectories of project root
+                try:
+                    for sub in self.default_root.iterdir():
+                        if sub.is_dir() and sub.name not in [".git", "venv", "__pycache__", "node_modules"]:
+                            sub_file = sub / Path(path).name
+                            if sub_file.exists() and sub_file.is_file():
+                                cands.append(sub_file)
+                except Exception:
+                    pass
                 # Also search case-insensitively in generated_documents
                 gen_dir = self.default_root / "generated_documents"
                 if gen_dir.exists():
@@ -259,7 +357,10 @@ class FileAgent:
                 if found:
                     p = found
                 else:
-                    return {"success": False, "error": f"Path not found: {path}"}
+                    # Multi-drive fast search across all mounted drives (e.g. C:, D:, E:, F:)
+                    p = self._find_file_across_drives(path)
+                    if not p:
+                        return {"success": False, "error": f"Path not found: {path}"}
 
             if reveal:
                 if p.is_dir():
@@ -268,7 +369,13 @@ class FileAgent:
                     subprocess.Popen(f'explorer.exe /select,"{p}"', shell=True)
                 return {"success": True, "path": str(p), "message": f"Revealed '{p.name}' in Windows File Explorer."}
             else:
-                os.startfile(str(p))
+                try:
+                    os.startfile(str(p))
+                except Exception as open_err:
+                    if p.suffix.lower() in [".xml", ".txt", ".json", ".log", ".cpp", ".py", ".md", ".csv", ".ini"]:
+                        subprocess.Popen(["notepad.exe", str(p)])
+                    else:
+                        raise open_err
                 return {"success": True, "path": str(p), "message": f"Opened '{p.name}' in default Windows application."}
         except Exception as e:
             return {"success": False, "error": str(e)}

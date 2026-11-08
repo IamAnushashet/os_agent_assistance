@@ -185,7 +185,9 @@ def get_live_telemetry():
     try:
         cpu = psutil.cpu_percent(interval=None)
         vm = psutil.virtual_memory()
-        du = psutil.disk_usage("C:\\")
+        sys_drive = os.environ.get("SystemDrive", "C:") + "\\"
+        target_drive = sys_drive if os.path.exists(sys_drive) else str(PROJECT_ROOT.anchor)
+        du = psutil.disk_usage(target_drive)
         return {
             "success": True,
             "cpu_percent": cpu,
