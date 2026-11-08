@@ -1234,6 +1234,36 @@ if __name__ == "__main__":
             ))
             return SemanticPlan(goal="System Telemetry Check", strategy="System Introspection", steps=steps)
 
+        # Case 3C: Command Prompt / Terminal queries (e.g. check python version in cmd, open cmd and check X)
+        if any(w in p_lower for w in ["cmd", "command prompt", "terminal", "powershell"]):
+            cmd_to_run = ""
+            if "py --version" in p_lower or re.search(r"\bpy\s+--?v", p_lower):
+                cmd_to_run = "py --version"
+            elif "python" in p_lower and ("version" in p_lower or "-v" in p_lower or "--version" in p_lower or "check" in p_lower or "find" in p_lower or "open" in p_lower):
+                cmd_to_run = "python --version"
+            elif "node" in p_lower and ("version" in p_lower or "-v" in p_lower):
+                cmd_to_run = "node --version"
+            elif "git" in p_lower and ("version" in p_lower or "-v" in p_lower):
+                cmd_to_run = "git --version"
+            elif "pip" in p_lower and ("version" in p_lower or "list" in p_lower):
+                cmd_to_run = "pip --version"
+
+            if cmd_to_run:
+                launch_tool = tool_registry.get("system_launch_app")
+                if launch_tool:
+                    steps.append(PlanStep(
+                        step_number=1,
+                        title=f"Open interactive Command Prompt running '{cmd_to_run}'",
+                        agent=launch_tool.agent,
+                        tool_name=launch_tool.name,
+                        params={"app_name": "cmd", "arguments": cmd_to_run},
+                        category=launch_tool.category,
+                        risk_level=launch_tool.risk_level,
+                        reason="Open a visible Command Prompt window on desktop and execute command live for the user",
+                        expected_outcome=f"Command Prompt window opened with '{cmd_to_run}' executed"
+                    ))
+                    return SemanticPlan(goal=f"Open CMD and execute {cmd_to_run}", strategy="Interactive Shell Execution", steps=steps)
+
         # Case 4: Launch application / browser open in new tab
         if any(k in p_lower for k in ["open", "launch", "focus"]):
             # Check if this is a browser open or focus request:
@@ -1417,7 +1447,11 @@ if __name__ == "__main__":
                 "   - When a user asks to open or reveal a file/document: use 'file_open'.\n"
                 "   - When a user request asks to play music, songs, or videos on YouTube (e.g., 'open youtube and play X', 'play X on youtube', 'search X on youtube'):\n"
                 "     * Step 1 (Browser Agent): 'browser_play_media' with params {'query': '<song_or_video_name>', 'platform': 'youtube'}.\n"
-                "     * NEVER split this into separate browser_navigate to homepage followed by browser_search on google. 'browser_play_media' handles in-app search or single-tab playback directly!\n\n"
+                "     * NEVER split this into separate browser_navigate to homepage followed by browser_search on google. 'browser_play_media' handles in-app search or single-tab playback directly!\n"
+                "   - When a user request asks to run, check, or find something in or open in Command Prompt, cmd, terminal, or powershell (e.g., 'find python version open in my local cmd', 'check py --version in cmd', 'open my cmd and check python version', 'open terminal and check X'):\n"
+                "     * Plan a SINGLE step: System Agent 'system_launch_app' with params {'app_name': 'cmd', 'arguments': '<command_to_run>'} (e.g., 'python --version' or 'py --version').\n"
+                "     * 'system_launch_app' will automatically launch the visible interactive Command Prompt window on the desktop, execute the command directly inside the opened window for the user, and return the output.\n"
+                "     * DO NOT add a separate 'system_run_command' step, because running a separate background command triggers an unnecessary permission prompt and does not run inside the opened window.\n\n"
                 "6. Never invent tool names not in the catalog. Keep plans concise (1 to 5 steps maximum).\n"
                 "7. Output JSON ONLY.\n"
             )

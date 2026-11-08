@@ -386,7 +386,13 @@ class MultiAgentOrchestrator:
                 tool_name = a.get("tool", "")
                 params = a.get("params", {})
                 res = a.get("result", {})
-                msg = res.get("message") or res.get("summary") or res.get("analysis")
+                msg = (
+                    res.get("message")
+                    or res.get("summary")
+                    or res.get("analysis")
+                    or res.get("explanation")
+                    or res.get("diagnosis")
+                )
 
                 if tool_name == "file_write":
                     code_content = params.get("content", "").strip()
@@ -485,6 +491,11 @@ class MultiAgentOrchestrator:
                     out = res.get("stdout", "").strip()
                     summary_parts.append(f"**Command Output:**\n```powershell\n{out}\n```")
 
+                elif tool_name == "system_launch_app" and res.get("output"):
+                    app_n = res.get("app", "Application")
+                    out = res.get("output", "").strip()
+                    summary_parts.append(f"💻 Opened **{app_n}** window and executed command:\n```powershell\n{out}\n```")
+
                 elif "entries" in res or tool_name == "file_list_dir":
                     entries = res.get("entries", [])
                     dir_path = res.get("path", "")
@@ -500,6 +511,71 @@ class MultiAgentOrchestrator:
                     elif msg:
                         summary_parts.append(msg)
 
+                elif "files" in res or tool_name == "file_search":
+                    files = res.get("files", [])
+                    q_term = res.get("query") or params.get("query", "")
+                    if files:
+                        lines = [f"### 🔍 File Search Results for `{q_term}` ({len(files)} match{'es' if len(files) != 1 else ''})\n"]
+                        exact_matches = [
+                            f for f in files
+                            if f.get("name", "").lower() == q_term.lower()
+                            or Path(f.get("name", "")).name.lower() == Path(q_term).name.lower()
+                            or Path(f.get("path", "")).name.lower() == Path(q_term).name.lower()
+                        ]
+                        if exact_matches:
+                            lines.append("**Exact Match Found:**")
+                            for ef in exact_matches:
+                                sz_kb = round(ef.get("size", 0) / 1024, 1) if ef.get("size") is not None else None
+                                sz_str = f" ({sz_kb} KB)" if sz_kb is not None else ""
+                                lines.append(f"- 📄 **Path:** `{ef.get('path')}`{sz_str}")
+                            lines.append("")
+                        other_matches = [f for f in files if f not in exact_matches]
+                        if other_matches:
+                            if exact_matches:
+                                lines.append("**Other Matches:**")
+                            for of in other_matches:
+                                c_flag = " *(content match)*" if of.get("content_match") else ""
+                                sz_kb = round(of.get("size", 0) / 1024, 1) if of.get("size") is not None else None
+                                sz_str = f" ({sz_kb} KB)" if sz_kb is not None else ""
+                                lines.append(f"- 📄 `{of.get('name')}`{c_flag}: `{of.get('path')}`{sz_str}")
+                        summary_parts.append("\n".join(lines))
+                    else:
+                        summary_parts.append(f"🔍 No files found matching `{q_term}` in the workspace.")
+
+                elif tool_name == "file_read" and ("content" in res or "path" in res):
+                    content = res.get("content", "")
+                    f_path = res.get("path") or params.get("path", "")
+                    fn = Path(f_path).name or "File"
+                    ext = Path(f_path).suffix.lstrip(".").lower() or "text"
+                    total_chars = res.get("total_chars", len(content))
+                    if res.get("error"):
+                        summary_parts.append(f"❌ Error reading `{fn}`: {res.get('error')}")
+                    elif len(content) <= 3000:
+                        summary_parts.append(f"### 📄 File: `{fn}`\n**Location:** `{f_path}` ({total_chars} characters)\n\n```{ext}\n{content}\n```")
+                    else:
+                        preview = content[:3000]
+                        summary_parts.append(f"### 📄 File: `{fn}`\n**Location:** `{f_path}` (Showing first 3,000 of {total_chars} characters)\n\n```{ext}\n{preview}\n...\n```")
+
+                elif tool_name == "browser_navigate" and ("url" in res or "title" in res):
+                    dest_url = res.get("url") or params.get("url", "")
+                    page_title = res.get("title") or dest_url
+                    summary_parts.append(f"🌐 **Browser Navigated**: [{page_title}]({dest_url})")
+
+                elif tool_name == "browser_search" and ("query" in res or "url" in res):
+                    q = res.get("query") or params.get("query", "")
+                    engine = res.get("engine") or params.get("engine", "google")
+                    summary_parts.append(f"🔍 **Web Search ({engine.title()})**: Searched for `{q}` in active browser session.")
+
+                elif tool_name == "vision_locate_target" and "coordinates" in res:
+                    coords = res.get("coordinates") or {}
+                    t_name = res.get("target") or params.get("target", "element")
+                    summary_parts.append(f"🎯 **Target Located**: `{t_name}` at screen coordinates `(X: {coords.get('x')}, Y: {coords.get('y')})`.")
+
+                elif tool_name in ["vision_analyze_screen", "vision_explain_error", "system_diagnose"]:
+                    analysis_text = res.get("analysis") or res.get("explanation") or res.get("diagnosis") or msg
+                    if analysis_text:
+                        summary_parts.append(analysis_text)
+
                 elif msg:
                     summary_parts.append(msg)
 
@@ -513,14 +589,21 @@ class MultiAgentOrchestrator:
             else:
                 full_summary = "\n\n".join(summary_parts) if summary_parts else f"Task '{prompt}' completed successfully."
                 
-                # If prompt is an explanation/analysis query, synthesize with LLM Gateway
-                is_explanatory = any(w in prompt.lower() for w in ["explain", "describe", "what is", "how does", "architecture", "overview", "structure", "tell me about", "analyze", "break down"])
-                if is_explanatory:
+                # If prompt is a question, explanation, or informational query, synthesize with LLM Gateway
+                query_indicators = [
+                    "explain", "describe", "what is", "what are", "how does", "how do", "how to",
+                    "architecture", "overview", "structure", "tell me", "analyze", "break down",
+                    "can you give", "give me", "give the", "give path", "where is", "where are",
+                    "path of", "location of", "find", "search", "show me", "which", "why", "who",
+                    "summarize", "detail", "check if", "is there", "list", "read", "display", "print"
+                ]
+                is_query = any(w in prompt.lower() for w in query_indicators) or "?" in prompt
+                if is_query and summary_parts:
                     try:
-                        context_data = "\n\n".join(summary_parts) if summary_parts else ""
+                        context_data = "\n\n".join(summary_parts)
                         synth_messages = [
-                            {"role": "system", "content": "You are the Autonomous Multi-Agent OS Assistant. The user asked an explanatory or analytical question about their system or repository. Provide a thorough, well-structured, professional technical explanation answering their query using the observed evidence and context. Use clean Markdown headings, bullet points, and code formatting."},
-                            {"role": "user", "content": f"User Request: {prompt}\n\nObserved Evidence / Workspace Data:\n{context_data}\n\nPlease provide a clear, comprehensive, and helpful explanation directly answering the user's request."}
+                            {"role": "system", "content": "You are the Autonomous Multi-Agent OS Assistant operating the user's actual Windows computer. The user asked a question or requested specific information about files, directories, processes, browser, or system state. Provide a direct, concise, professional, and clear answer using the observed evidence and context. If a file path or location was requested, state the exact path prominently first. Use clean Markdown formatting."},
+                            {"role": "user", "content": f"User Request: {prompt}\n\nObserved Evidence / Workspace Data:\n{context_data}\n\nPlease provide a clear, comprehensive, and helpful direct answer to the user's request."}
                         ]
                         synth_resp = await llm_gateway.chat_complete(synth_messages)
                         if synth_resp and synth_resp.get("content"):

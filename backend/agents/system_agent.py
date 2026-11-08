@@ -180,26 +180,75 @@ class SystemAgent:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def launch_app(self, app_name: str) -> Dict[str, Any]:
-        """Launches an approved application by name into an independent desktop window."""
+    def launch_app(self, app_name: str, arguments: Optional[str] = None) -> Dict[str, Any]:
+        """Launches an approved application by name into an independent desktop window with optional arguments."""
         k = app_name.lower().strip()
         exe = COMMON_APP_MAP.get(k, app_name)
         try:
-            # 1. Native Windows ShellExecute: launches GUI and standalone windows
-            try:
-                os.startfile(exe)
-            except Exception:
-                # 2. Interactive Console fallback for CLI shells
-                if k in ["cmd", "command prompt", "cmd.exe", "command"]:
-                    subprocess.Popen('start "Command Prompt" cmd.exe /k', shell=True)
-                elif k in ["powershell", "powershell.exe", "pwsh", "pwsh.exe"]:
-                    subprocess.Popen('start "Windows PowerShell" powershell.exe -NoExit', shell=True)
+            # Clean and parse arguments
+            clean_args = (arguments or "").strip()
+            switch = "/k"
+            cmd_body = ""
+            if clean_args:
+                if clean_args.lower().startswith(("/k ", "/c ")):
+                    switch = clean_args[:2].lower()
+                    cmd_body = clean_args[3:].strip()
+                elif clean_args.lower() in ["/k", "/c"]:
+                    switch = clean_args.lower()
+                    cmd_body = ""
                 else:
+                    switch = "/k"
+                    cmd_body = clean_args
+
+            captured_output = ""
+
+            # 1. Interactive Console for CLI shells (must use dedicated visible console window that stays open)
+            if k in ["cmd", "command prompt", "cmd.exe", "command"]:
+                if cmd_body:
+                    subprocess.Popen(f'start "Command Prompt" cmd.exe {switch} "{cmd_body}"', shell=True)
+                    try:
+                        q_res = subprocess.run(cmd_body, shell=True, capture_output=True, text=True, timeout=5)
+                        captured_output = (q_res.stdout or q_res.stderr or "").strip()
+                    except Exception:
+                        pass
+                else:
+                    subprocess.Popen('start "Command Prompt" cmd.exe', shell=True)
+
+            elif k in ["powershell", "powershell.exe", "pwsh", "pwsh.exe"]:
+                if cmd_body:
+                    subprocess.Popen(f'start "Windows PowerShell" powershell.exe -NoExit -Command "{cmd_body}"', shell=True)
+                    try:
+                        q_res = subprocess.run(["powershell.exe", "-NoProfile", "-Command", cmd_body], capture_output=True, text=True, timeout=5)
+                        captured_output = (q_res.stdout or q_res.stderr or "").strip()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        os.startfile(exe)
+                    except Exception:
+                        subprocess.Popen('start "Windows PowerShell" powershell.exe -NoExit', shell=True)
+
+            else:
+                if clean_args:
                     creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
-                    subprocess.Popen(f'start "" "{exe}"', shell=True, creationflags=creation_flags)
+                    subprocess.Popen(f'start "" "{exe}" {clean_args}', shell=True, creationflags=creation_flags)
+                else:
+                    try:
+                        os.startfile(exe)
+                    except Exception:
+                        creation_flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
+                        subprocess.Popen(f'start "" "{exe}"', shell=True, creationflags=creation_flags)
 
             time.sleep(0.8)
-            return {"success": True, "app": app_name, "executable": exe, "message": f"Launched '{app_name}' successfully."}
+            msg = f"Launched '{app_name}' successfully"
+            if cmd_body:
+                msg += f" with command: {cmd_body}"
+            elif clean_args:
+                msg += f" with arguments: {clean_args}"
+            res_dict = {"success": True, "app": app_name, "executable": exe, "message": msg}
+            if captured_output:
+                res_dict["output"] = captured_output
+            return res_dict
         except Exception as e:
             return {"success": False, "error": f"Could not launch application '{app_name}': {e}"}
 

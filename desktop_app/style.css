@@ -71,7 +71,7 @@ body {
    ========================================================================== */
 .command-deck {
   height: 54px;
-  background: 1px solid #000000;
+  background: var(--bg-header);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
@@ -352,7 +352,7 @@ body {
 
 .sidebar-log {
   width: 240px;
-  background: #000000;
+  background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;

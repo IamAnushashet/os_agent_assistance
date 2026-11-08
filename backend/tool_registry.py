@@ -452,8 +452,11 @@ class ToolRegistry:
         self.register(ToolDefinition(
             name="system_launch_app",
             agent="System Agent",
-            description="Launches approved Windows application (notepad, calc, code, etc.).",
-            parameters={"app_name": {"type": "string"}},
+            description="Launches approved Windows application (notepad, calc, code, cmd, etc.) with optional arguments.",
+            parameters={
+                "app_name": {"type": "string"},
+                "arguments": {"type": "string", "default": ""}
+            },
             category=ActionCategory.SAFE_READ.value,
             risk_level=RiskLevel.LOW.value,
             handler=system_agent.launch_app,
