@@ -1380,51 +1380,138 @@
       }
     });
 
-    // --- Speech-to-Text Voice Input ---
+    // --- Robust Dual-Engine Speech-to-Text Voice Dictation ---
     let recognizer = null;
     let isListening = false;
+    let mobileRecorder = null;
+    let mobileAudioChunks = [];
     const btnVoice = document.getElementById('btn-voice');
 
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognizer = new SpeechRec();
-      recognizer.continuous = false;
-      recognizer.interimResults = false;
+      try {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognizer = new SpeechRec();
+        recognizer.continuous = false;
+        recognizer.interimResults = true;
+        recognizer.lang = 'en-US';
 
-      recognizer.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        promptInput.value = transcript;
-        stopVoiceListening();
-        sendAction();
-      };
-
-      recognizer.onerror = () => stopVoiceListening();
-      recognizer.onend = () => stopVoiceListening();
-    }
-
-    function toggleVoiceInput() {
-      if (!recognizer) {
-        alert("Speech recognition is not supported in this mobile browser.");
-        return;
-      }
-      if (isListening) {
-        recognizer.stop();
-        stopVoiceListening();
-      } else {
-        try {
-          recognizer.start();
+        recognizer.onstart = () => {
           isListening = true;
           if (btnVoice) btnVoice.classList.add('listening');
           feedbackText.innerHTML = `🎙️ <b>Listening...</b> speak instruction now`;
-        } catch (e) {
+        };
+
+        recognizer.onresult = (e) => {
+          let text = '';
+          for (let i = e.resultIndex; i < e.results.length; ++i) {
+            text += e.results[i][0].transcript;
+            if (e.results[i].isFinal) {
+              promptInput.value = text.trim();
+              stopVoiceListening();
+              sendAction();
+              return;
+            }
+          }
+          if (text) promptInput.value = text;
+        };
+
+        recognizer.onerror = (e) => {
+          console.warn("Mobile Web Speech error, falling back to MediaRecorder", e);
           stopVoiceListening();
+          startMobileAudioRecording();
+        };
+
+        recognizer.onend = () => stopVoiceListening();
+      } catch (e) {
+        recognizer = null;
+      }
+    }
+
+    async function startMobileAudioRecording() {
+      if (isListening && mobileRecorder && mobileRecorder.state === 'recording') {
+        mobileRecorder.stop();
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Microphone recording is not supported on this browser.");
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mobileAudioChunks = [];
+        const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+        mobileRecorder = new MediaRecorder(stream, { mimeType: mime });
+
+        mobileRecorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) mobileAudioChunks.push(e.data);
+        };
+
+        mobileRecorder.onstart = () => {
+          isListening = true;
+          if (btnVoice) btnVoice.classList.add('listening');
+          feedbackText.innerHTML = `🎙️ <b>Recording voice...</b> tap mic again to send`;
+        };
+
+        mobileRecorder.onstop = async () => {
+          stopVoiceListening();
+          stream.getTracks().forEach(t => t.stop());
+
+          if (mobileAudioChunks.length === 0) return;
+          feedbackText.innerHTML = `⏳ <b>Transcribing speech with Gemini...</b>`;
+          const blob = new Blob(mobileAudioChunks, { type: mime });
+          const fd = new FormData();
+          fd.append('file', blob, `mobile_voice.${mime.includes('webm') ? 'webm' : 'mp4'}`);
+
+          try {
+            const res = await fetch(`${API_BASE}/api/speech/transcribe`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success && data.transcript && data.transcript.trim()) {
+              promptInput.value = data.transcript.trim();
+              feedbackText.innerHTML = `🎙️ <b>Transcribed:</b> "${escapeHtml(data.transcript.trim())}"`;
+              sendAction();
+            } else {
+              feedbackText.innerHTML = `⚠️ <b>No speech detected</b> in audio`;
+            }
+          } catch (err) {
+            feedbackText.innerHTML = `❌ <b>Transcription error:</b> ${escapeHtml(err.message)}`;
+          }
+        };
+
+        mobileRecorder.start();
+      } catch (err) {
+        stopVoiceListening();
+        alert("Microphone permission denied: " + err.message);
+      }
+    }
+
+    function toggleVoiceInput() {
+      if (isListening) {
+        if (recognizer) { try { recognizer.stop(); } catch(e){} }
+        if (mobileRecorder && mobileRecorder.state === 'recording') { try { mobileRecorder.stop(); } catch(e){} }
+        stopVoiceListening();
+        return;
+      }
+
+      if (recognizer) {
+        try {
+          recognizer.start();
+          return;
+        } catch (e) {
+          console.warn("recognizer.start failed, switching to MediaRecorder", e);
         }
       }
+
+      startMobileAudioRecording();
     }
 
     function stopVoiceListening() {
       isListening = false;
       if (btnVoice) btnVoice.classList.remove('listening');
+      if (feedbackText && feedbackText.innerHTML.includes('Listening') || feedbackText.innerHTML.includes('Recording voice')) {
+        feedbackText.innerHTML = `🤖 <b>OS Agent:</b> Ready for your command`;
+      }
     }
 
     // --- TTS Audio Output ---

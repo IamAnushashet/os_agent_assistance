@@ -2472,51 +2472,185 @@ function setupEventListeners() {
   setupChatAttachmentEvents();
   setupConverterControls();
 
-  // Speech Web Speech API fallback
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognizer = new SpeechRec();
-    recognizer.continuous = false;
-    recognizer.interimResults = false;
+  // --- Robust Dual-Engine Microphone Listening & Prompt Dictation ---
+  let isListening = false;
+  let webSpeechRecognizer = null;
+  let mediaRecorder = null;
+  let audioChunks = [];
+  const defaultPlaceholder = promptInput.placeholder;
 
-    let isListening = false;
-    const toggleMic = () => {
-      if (isListening) {
-        recognizer.stop();
-        btnMic.classList.remove('active');
-        isListening = false;
-      } else {
-        recognizer.start();
-        btnMic.classList.add('active');
-        isListening = true;
-      }
-    };
-
-    btnMic.addEventListener('click', toggleMic);
-    hudBtnMic.addEventListener('click', toggleMic);
-
-    recognizer.onresult = (evt) => {
-      const transcript = evt.results[0][0].transcript;
-      promptInput.value = transcript;
-      hudInput.value = transcript;
-      btnMic.classList.remove('active');
-      isListening = false;
-      submitPrompt(transcript);
-    };
-
-    recognizer.onerror = (evt) => {
-      btnMic.classList.remove('active');
-      isListening = false;
-      const err = evt && evt.error ? evt.error : 'unknown';
-      if (err === 'not-allowed') {
-        showToast('Microphone access denied. Please enable microphone permissions in Windows Settings.', 'error');
-      } else if (err === 'no-speech') {
-        showToast('No speech detected. Please speak into your microphone.', 'info');
-      } else {
-        showToast(`Speech recognition error (${err}).`, 'warning');
-      }
-    };
+  function setMicActiveState(active, statusText = '') {
+    isListening = active;
+    if (active) {
+      if (btnMic) btnMic.classList.add('active');
+      if (hudBtnMic) hudBtnMic.classList.add('active');
+      promptInput.placeholder = statusText || "🎙️ Listening... Speak your prompt now (click 🎙️ to stop & submit)";
+      hudInput.placeholder = statusText || "🎙️ Listening... Speak your prompt now";
+    } else {
+      if (btnMic) btnMic.classList.remove('active');
+      if (hudBtnMic) hudBtnMic.classList.remove('active');
+      promptInput.placeholder = defaultPlaceholder;
+      hudInput.placeholder = "Type instruction for Nexus OS Agent...";
+    }
   }
+
+  // Engine 1: Native Web Speech Recognition (Chrome / Edge with live interim typing)
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    try {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      webSpeechRecognizer = new SpeechRec();
+      webSpeechRecognizer.continuous = false;
+      webSpeechRecognizer.interimResults = true;
+      webSpeechRecognizer.lang = 'en-US';
+
+      webSpeechRecognizer.onstart = () => {
+        setMicActiveState(true, "🎙️ Listening... Speak your prompt now");
+      };
+
+      webSpeechRecognizer.onresult = (evt) => {
+        let interimText = '';
+        let finalText = '';
+
+        for (let i = evt.resultIndex; i < evt.results.length; ++i) {
+          if (evt.results[i].isFinal) {
+            finalText += evt.results[i][0].transcript;
+          } else {
+            interimText += evt.results[i][0].transcript;
+          }
+        }
+
+        const displayText = (finalText || interimText).trim();
+        if (displayText) {
+          promptInput.value = displayText;
+          hudInput.value = displayText;
+        }
+
+        if (finalText && finalText.trim()) {
+          setMicActiveState(false);
+          submitPrompt(finalText.trim());
+        }
+      };
+
+      webSpeechRecognizer.onerror = (evt) => {
+        const err = evt && evt.error ? evt.error : 'unknown';
+        console.warn('Web Speech API error:', err);
+        setMicActiveState(false);
+        if (err === 'not-allowed') {
+          showToast('Microphone access blocked. Switching to audio recording fallback...', 'warning');
+          startMediaRecorderFallback();
+        } else if (err === 'network') {
+          showToast('Browser speech service offline. Switching to direct audio transcription...', 'warning');
+          startMediaRecorderFallback();
+        } else if (err === 'no-speech') {
+          showToast('No speech detected. Please speak into your microphone.', 'info');
+        }
+      };
+
+      webSpeechRecognizer.onend = () => {
+        setMicActiveState(false);
+      };
+    } catch (e) {
+      console.warn('SpeechRecognition init error:', e);
+      webSpeechRecognizer = null;
+    }
+  }
+
+  // Engine 2: Universal MediaRecorder + Server-Side Gemini Transcription Fallback
+  async function startMediaRecorderFallback() {
+    if (isListening && mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('Microphone recording is not supported in this browser.', 'error');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstart = () => {
+        setMicActiveState(true, "🎙️ Recording audio... Click mic again to stop & transcribe");
+        showToast("Recording microphone... Speak your prompt, then click mic to transcribe.", "info");
+      };
+
+      mediaRecorder.onstop = async () => {
+        setMicActiveState(false);
+        stream.getTracks().forEach(t => t.stop());
+
+        if (audioChunks.length === 0) return;
+        const audioBlob = new Blob(audioChunks, { type: mime });
+        promptInput.placeholder = "⏳ Transcribing your speech with Gemini...";
+        showToast("Transcribing speech audio with Gemini...", "info");
+
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, `recording.${mime.includes('webm') ? 'webm' : 'mp4'}`);
+
+          const res = await fetch(`${API_BASE}/api/speech/transcribe`, {
+            method: 'POST',
+            body: formData
+          });
+          const data = await res.json();
+
+          promptInput.placeholder = defaultPlaceholder;
+          if (data.success && data.transcript && data.transcript.trim()) {
+            const transcript = data.transcript.trim();
+            promptInput.value = transcript;
+            hudInput.value = transcript;
+            showToast(`Voice transcribed: "${transcript}"`, "success");
+            submitPrompt(transcript);
+          } else {
+            showToast("No intelligible speech recognized in audio.", "warning");
+          }
+        } catch (err) {
+          promptInput.placeholder = defaultPlaceholder;
+          showToast(`Transcription failed: ${err.message}`, "error");
+        }
+      };
+
+      mediaRecorder.start();
+    } catch (err) {
+      setMicActiveState(false);
+      showToast(`Could not access microphone: ${err.message}. Please allow microphone permissions.`, "error");
+    }
+  }
+
+  // Unified Toggle Handler
+  function handleMicClick() {
+    if (isListening) {
+      if (webSpeechRecognizer) {
+        try { webSpeechRecognizer.stop(); } catch (e) {}
+      }
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        try { mediaRecorder.stop(); } catch (e) {}
+      }
+      setMicActiveState(false);
+      return;
+    }
+
+    if (webSpeechRecognizer) {
+      try {
+        webSpeechRecognizer.start();
+        return;
+      } catch (e) {
+        console.warn("webSpeechRecognizer.start failed, falling back to MediaRecorder", e);
+      }
+    }
+
+    startMediaRecorderFallback();
+  }
+
+  if (btnMic) btnMic.addEventListener('click', handleMicClick);
+  if (hudBtnMic) hudBtnMic.addEventListener('click', handleMicClick);
 }
 
 window.addEventListener('DOMContentLoaded', init);

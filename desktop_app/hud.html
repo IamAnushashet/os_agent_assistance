@@ -235,37 +235,108 @@
 
     let isListening = false;
     let recognition = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
 
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognition = new SpeechRec();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.onstart = () => {
-        isListening = true;
-        btnMic.style.color = '#ef4444';
-        hudStatusText.textContent = "Listening...";
-      };
-      recognition.onresult = (e) => {
-        const text = e.results[0][0].transcript;
-        hudInput.value = text;
-        submitHudPrompt(text);
-      };
-      recognition.onerror = () => {
-        isListening = false;
-        btnMic.style.color = '';
-        hudStatusText.textContent = "Ready";
-      };
-      recognition.onend = () => {
-        isListening = false;
-        btnMic.style.color = '';
-      };
+      try {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRec();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.onstart = () => {
+          isListening = true;
+          btnMic.style.color = '#ef4444';
+          hudStatusText.textContent = "Listening...";
+        };
+        recognition.onresult = (e) => {
+          let text = '';
+          for (let i = e.resultIndex; i < e.results.length; ++i) {
+            text += e.results[i][0].transcript;
+            if (e.results[i].isFinal) {
+              hudInput.value = text;
+              isListening = false;
+              btnMic.style.color = '';
+              hudStatusText.textContent = "Ready";
+              submitHudPrompt(text);
+              return;
+            }
+          }
+          if (text) hudInput.value = text;
+        };
+        recognition.onerror = () => {
+          isListening = false;
+          btnMic.style.color = '';
+          hudStatusText.textContent = "Ready";
+        };
+        recognition.onend = () => {
+          isListening = false;
+          btnMic.style.color = '';
+          hudStatusText.textContent = "Ready";
+        };
+      } catch (e) {
+        recognition = null;
+      }
+    }
+
+    async function recordAudioFallback() {
+      if (isListening && mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+        mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstart = () => {
+          isListening = true;
+          btnMic.style.color = '#ef4444';
+          hudStatusText.textContent = "Recording...";
+        };
+        mediaRecorder.onstop = async () => {
+          isListening = false;
+          btnMic.style.color = '';
+          hudStatusText.textContent = "Transcribing...";
+          stream.getTracks().forEach(t => t.stop());
+          if (audioChunks.length === 0) { hudStatusText.textContent = "Ready"; return; }
+          const blob = new Blob(audioChunks, { type: mime });
+          const fd = new FormData();
+          fd.append('file', blob, `hud_audio.${mime.includes('webm') ? 'webm' : 'mp4'}`);
+          try {
+            const res = await fetch(`${API_BASE}/api/speech/transcribe`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success && data.transcript && data.transcript.trim()) {
+              hudInput.value = data.transcript.trim();
+              submitHudPrompt(data.transcript.trim());
+            } else {
+              hudStatusText.textContent = "No speech detected";
+            }
+          } catch (e) {
+            hudStatusText.textContent = "Error";
+          }
+        };
+        mediaRecorder.start();
+      } catch (err) {
+        alert("Microphone permission denied or unavailable.");
+      }
     }
 
     btnMic.addEventListener('click', () => {
-      if (!recognition) return alert('Speech recognition not supported in this browser.');
-      if (isListening) recognition.stop();
-      else recognition.start();
+      if (isListening) {
+        if (recognition) { try { recognition.stop(); } catch(e){} }
+        if (mediaRecorder && mediaRecorder.state === 'recording') { try { mediaRecorder.stop(); } catch(e){} }
+        isListening = false;
+        btnMic.style.color = '';
+        hudStatusText.textContent = "Ready";
+        return;
+      }
+      if (recognition) {
+        try { recognition.start(); return; } catch (e) {}
+      }
+      recordAudioFallback();
     });
 
     btnSend.addEventListener('click', () => submitHudPrompt());

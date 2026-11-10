@@ -93,19 +93,25 @@ class SpeechService:
             return {"success": False, "error": "No API key configured for speech transcription.", "transcript": ""}
 
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        candidates = ["gemini-3.1-flash-lite", "gemini-3.5-transcribe", "gemini-3.5-flash"]
+        candidates = ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-flash-lite-latest", "gemini-flash-latest"]
+
+        clean_mime = (mime_type or "audio/wav").split(";")[0].strip().lower()
+        if clean_mime in ["audio/x-wav", "audio/wave"]:
+            clean_mime = "audio/wav"
+        elif clean_mime in ["audio/mpeg", "audio/mp3"]:
+            clean_mime = "audio/mp3"
 
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": "Transcribe the spoken speech in this audio recording word for word. Return ONLY the transcribed text. If the audio is silent or contains no speech, return an empty string."},
-                    {"inlineData": {"mimeType": mime_type, "data": audio_b64}}
+                    {"text": "Transcribe the spoken speech in this audio recording word for word into a concise user prompt. Return ONLY the transcribed text. If the audio is silent or contains no intelligible speech, return an empty string."},
+                    {"inlineData": {"mimeType": clean_mime, "data": audio_b64}}
                 ]
             }],
             "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000}
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             for model in candidates:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 try:
@@ -116,6 +122,8 @@ class SpeechService:
                         if cands:
                             parts = cands[0].get("content", {}).get("parts", [])
                             text = "".join(p.get("text", "") for p in parts).strip()
+                            if text.upper() in ["SILENCE", "SILENT", "NO SPEECH", "NO SPEECH DETECTED"]:
+                                text = ""
                             return {"success": True, "transcript": text, "model": model}
                 except Exception as e:
                     logger.warning(f"Audio transcription attempt with {model} failed: {e}")
