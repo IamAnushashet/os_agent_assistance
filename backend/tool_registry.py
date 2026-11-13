@@ -254,6 +254,17 @@ class ToolRegistry:
         ))
 
         self.register(ToolDefinition(
+            name="file_create_backup",
+            agent="File Agent",
+            description="Creates an explicit timestamped rollback backup of a file in scratch/.file_backups/.",
+            parameters={"path": {"type": "string"}},
+            category=ActionCategory.SAFE_READ.value,
+            risk_level=RiskLevel.LOW.value,
+            handler=file_agent.create_backup,
+            completion_criterion="Rollback backup created in scratch/.file_backups/."
+        ))
+
+        self.register(ToolDefinition(
             name="file_delete",
             agent="File Agent",
             description="Safely deletes file; creates backup in scratch/.file_backups/.",

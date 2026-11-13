@@ -183,6 +183,12 @@ class SystemAgent:
     def launch_app(self, app_name: str, arguments: Optional[str] = None) -> Dict[str, Any]:
         """Launches an approved application by name into an independent desktop window with optional arguments."""
         k = app_name.lower().strip()
+
+        # Security Kernel Invariant: Block any attempt to launch or reveal critical Windows system directories
+        combined_target = f"{app_name} {arguments or ''}".lower().replace("/", "\\")
+        if any(b in combined_target for b in ["system32", "syswow64", "\\windows\\system32", "\\windows\\syswow64", "\\boot"]):
+            return {"success": False, "error": f"Execution rejected: Access to critical Windows system path '{app_name}' is strictly blocked by Default-Deny Security Kernel."}
+
         exe = COMMON_APP_MAP.get(k, app_name)
         try:
             # Clean and parse arguments
@@ -374,20 +380,24 @@ class SystemAgent:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def mouse_click(self, x: int, y: int, button: str = "left", double_click: bool = False) -> Dict[str, Any]:
+    def mouse_click(self, x: int, y: int, button: str = "left", double_click: bool = False, **kwargs) -> Dict[str, Any]:
         """Performs direct mouse click on desktop coordinates (x, y)."""
         try:
-            controller.click(x, y, button=button, double_click=double_click)
-            return {"success": True, "x": x, "y": y, "button": button, "message": f"Clicked mouse {button} button at ({x}, {y})."}
+            clicks = 2 if double_click else 1
+            controller.click(x=int(x), y=int(y), button=button, clicks=clicks, double_click=double_click)
+            action_type = "Double-clicked" if clicks > 1 else "Clicked"
+            return {"success": True, "x": int(x), "y": int(y), "button": button, "clicks": clicks, "message": f"{action_type} mouse {button} button at ({int(x)}, {int(y)})."}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def run_command(self, command: str, timeout: float = 15.0) -> Dict[str, Any]:
         """Executes validated PowerShell command with safety restrictions."""
         import re
-        cmd_lower = command.lower()
+        cmd_lower = command.lower().replace("/", "\\")
         if re.search(r"(?:rmdir|del|remove-item)\s+.*[a-z]:[\\/]", cmd_lower):
             return {"success": False, "error": "Command rejected: contains blocked destructive root drive wipe pattern."}
+        if any(b in cmd_lower for b in ["system32", "syswow64", "\\windows\\system32", "\\windows\\syswow64"]) and any(v in cmd_lower for v in ["explorer", "start", "invoke-item", "ii ", "open", "rmdir", "del", "remove-item"]):
+            return {"success": False, "error": "Command rejected: Access or manipulation of critical Windows system path 'System32' is strictly blocked by Default-Deny Security Kernel."}
         for blocked in BLOCKED_COMMAND_PATTERNS:
             if blocked in cmd_lower:
                 return {"success": False, "error": f"Command rejected: contains blocked destructive pattern '{blocked}'."}

@@ -26,14 +26,21 @@ class FileAgent:
 
     def _resolve_safe_path(self, target: str, workspace_root: Optional[str] = None) -> Path:
         """Resolves canonical path and prevents directory traversal outside authorized bounds."""
+        target_str = str(target).strip().strip("'\"")
+        target_lower = target_str.lower().replace("/", "\\")
+
+        # 1. Proactively block any target referencing protected system directories
+        if any(seg in target_lower for seg in ["system32", "syswow64", "\\windows\\system32", "\\windows\\syswow64", "\\boot"]):
+            raise PermissionError(f"Access to critical Windows system path '{target}' is strictly blocked by Default-Deny Security Kernel.")
+
         base = Path(workspace_root or self.default_root).resolve()
-        candidate = Path(target)
+        candidate = Path(target_str)
         if not candidate.is_absolute():
             resolved = (base / candidate).resolve()
         else:
             resolved = candidate.resolve()
 
-        # Prevent operating on critical Windows directories dynamically across any drive letter
+        # 2. Prevent operating on critical Windows directories dynamically across any drive letter
         sys_str = str(resolved).lower()
         win_root = os.environ.get("SystemRoot", "C:\\Windows").lower()
         win_drive = Path(win_root).anchor.lower()
@@ -43,8 +50,8 @@ class FileAgent:
             os.path.join(win_drive, "boot").lower()
         ]
         for b in blocked_dirs:
-            if sys_str.startswith(b):
-                raise PermissionError(f"Access to critical Windows system path '{resolved}' is strictly blocked.")
+            if sys_str == b or sys_str.startswith(b + "\\") or sys_str.startswith(b):
+                raise PermissionError(f"Access to critical Windows system path '{resolved}' is strictly blocked by Default-Deny Security Kernel.")
 
         return resolved
 
@@ -95,6 +102,51 @@ class FileAgent:
         except Exception as e:
             logger.warning(f"Could not create backup for {file_path}: {e}")
             return None
+
+    def create_backup(self, path: str) -> Dict[str, Any]:
+        """Explicitly creates a timestamped rollback backup of a file in scratch/.file_backups/."""
+        try:
+            p = None
+            path_str = str(path).strip().strip("'\"")
+            try:
+                p = self._resolve_safe_path(path_str)
+            except Exception:
+                pass
+
+            if not p or not p.exists():
+                cands = [
+                    self.default_root / path_str,
+                    self.default_root / Path(path_str).name,
+                    self.default_root / "generated_documents" / Path(path_str).name,
+                    Path.home() / "Desktop" / Path(path_str).name,
+                    Path.home() / "Documents" / Path(path_str).name,
+                    Path.home() / "Downloads" / Path(path_str).name,
+                ]
+                for c in cands:
+                    if c.exists() and c.is_file():
+                        p = c
+                        break
+                if not p or not p.exists():
+                    p = self._find_file_across_drives(path_str)
+
+            if not p or not p.exists():
+                return {"success": False, "error": f"File does not exist: {path}"}
+            if not p.is_file():
+                return {"success": False, "error": f"Path is not a file: {path}"}
+
+            backup = self._create_backup(p)
+            if backup and backup.exists():
+                return {
+                    "success": True,
+                    "path": str(p),
+                    "backup_path": str(backup),
+                    "backup_filename": backup.name,
+                    "size_bytes": backup.stat().st_size,
+                    "message": f"Successfully created rollback backup of '{p.name}' at '{backup.name}' in scratch/.file_backups/."
+                }
+            return {"success": False, "error": f"Failed to create backup for '{p.name}'."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def search_files(self, query: str, search_dir: Optional[str] = None, max_results: int = 15) -> Dict[str, Any]:
         """Searches files by name or content match."""
@@ -187,16 +239,21 @@ class FileAgent:
             if p.exists() and not overwrite:
                 return {"success": False, "error": f"File '{path}' already exists and overwrite=False."}
 
+            backup = None
             if p.exists():
-                self._create_backup(p)
+                backup = self._create_backup(p)
 
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
+            msg = f"Successfully written to {p.name}"
+            if backup:
+                msg += f" (rollback backup saved in scratch/.file_backups/{backup.name})"
             return {
                 "success": True,
                 "path": str(p),
                 "bytes_written": len(content.encode("utf-8")),
-                "message": f"Successfully written to {p.name}"
+                "backup_path": str(backup) if backup else None,
+                "message": msg
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -270,8 +327,12 @@ class FileAgent:
     def open_file(self, path: str, reveal: bool = False, workspace_root: Optional[str] = None) -> Dict[str, Any]:
         """Opens file in default Windows application or reveals it in File Explorer."""
         try:
-            p = None
             path_str = str(path).strip()
+            path_lower = path_str.lower().replace("/", "\\")
+            if any(b in path_lower for b in ["system32", "syswow64", "\\windows\\system32", "\\windows\\syswow64", "\\boot"]):
+                return {"success": False, "error": f"Security Violation: Access to protected Windows path '{path}' is strictly blocked by Default-Deny Security Kernel."}
+
+            p = None
             # Handle numeric or ordinal references (e.g. "1", "2", "first", "second")
             if path_str in ["1", "0", "first", "1st"] and len(self.last_search_results) >= 1:
                 p = Path(self.last_search_results[0]["path"])

@@ -1085,6 +1085,24 @@ if __name__ == "__main__":
             ))
             return SemanticPlan(goal=f"Delete file {target_path}", strategy="Filesystem Modification", steps=steps)
 
+        # Case 0F2: File Rollback Backup
+        if any(w in p_lower for w in ["backup", "take backup", "create backup"]) and ("file" in p_lower or any(ext in p_lower for ext in [".txt", ".pdf", ".pptx", ".docx", ".xlsx", ".json", ".log", ".xml", ".py"])):
+            file_match = re.search(r"(?:file|of|for)\s+([a-zA-Z0-9_.\-\\\/]+)", prompt, flags=re.IGNORECASE)
+            target_path = file_match.group(1).strip() if file_match else "notes.txt"
+            tool = tool_registry.get("file_create_backup") or tool_registry.get("file_read")
+            steps.append(PlanStep(
+                step_number=1,
+                title=f"Create rollback backup of file '{target_path}'",
+                agent=tool.agent,
+                tool_name=tool.name,
+                params={"path": target_path},
+                category=tool.category,
+                risk_level=tool.risk_level,
+                reason="Create timestamped rollback backup in scratch/.file_backups/",
+                expected_outcome="Rollback backup created safely"
+            ))
+            return SemanticPlan(goal=f"Create backup of file {target_path}", strategy="Safe Rollback Backup", steps=steps)
+
         # Case 0G: File Read
         if any(w in p_lower for w in ["read", "view", "inspect", "show"]) and "file" in p_lower:
             file_match = re.search(r"(?:file|at)\s+([a-zA-Z0-9_.\-\\\/]+)", prompt, flags=re.IGNORECASE)

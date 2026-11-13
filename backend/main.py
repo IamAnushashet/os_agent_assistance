@@ -1025,15 +1025,17 @@ async def websocket_remote_endpoint(websocket: WebSocket):
                 x = data.get("x")
                 y = data.get("y")
                 btn = data.get("button", "left")
+                is_dbl = bool(data.get("double_click", False))
                 if x is not None and y is not None:
-                    controller.click(x=int(x), y=int(y), button=btn)
-                    logger.info(f"Direct screen mirror click: ({x}, {y}) [{btn}]")
+                    controller.click(x=int(x), y=int(y), button=btn, double_click=is_dbl)
+                    logger.info(f"Direct screen mirror click: ({x}, {y}) [{btn}] double={is_dbl}")
                     await websocket.send_json({"type": "ACTION_FEEDBACK", "message": f"Clicked ({x}, {y})"})
 
             elif evt_type in ["trackpad_click", "click"]:
                 btn = data.get("button", "left")
                 clicks = int(data.get("clicks", 1))
-                controller.click(button=btn, clicks=clicks)
+                is_dbl = bool(data.get("double_click", False)) or clicks >= 2
+                controller.click(button=btn, clicks=clicks, double_click=is_dbl)
 
             elif evt_type in ["trackpad_scroll", "scroll"]:
                 amount = float(data.get("dy") or data.get("amount", 0))

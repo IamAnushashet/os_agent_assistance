@@ -17,7 +17,7 @@ MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
-MOUSEEVENTF_RIGHTUP = 0x000A
+MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
@@ -69,22 +69,28 @@ class InputController:
         if not user32.GetCursorPos(ctypes.byref(pt)):
             user32.SetCursorPos(pt.x + int(dx), pt.y + int(dy))
 
-    def click(self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left", clicks: int = 1):
+    def click(self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left", clicks: int = 1, double_click: bool = False, **kwargs):
         ensure_interactive_desktop()
+        if double_click or kwargs.get("double", False):
+            clicks = max(clicks, 2)
+
         if x is not None and y is not None:
-            self.move_to(x, y)
-            time.sleep(0.02)
-
-        down_flag = MOUSEEVENTF_LEFTDOWN if button == "left" else MOUSEEVENTF_RIGHTDOWN
-        up_flag = MOUSEEVENTF_LEFTUP if button == "left" else MOUSEEVENTF_RIGHTUP
-        if button == "middle":
-            down_flag, up_flag = MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP
-
-        for _ in range(clicks):
-            user32.mouse_event(down_flag, 0, 0, 0, 0)
+            self.move_to(int(x), int(y))
             time.sleep(0.03)
+
+        btn = str(button).lower().strip()
+        if btn in ["right", "r", "2"]:
+            down_flag, up_flag = MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP
+        elif btn in ["middle", "m", "3"]:
+            down_flag, up_flag = MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP
+        else:
+            down_flag, up_flag = MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
+
+        for i in range(clicks):
+            user32.mouse_event(down_flag, 0, 0, 0, 0)
+            time.sleep(0.04)
             user32.mouse_event(up_flag, 0, 0, 0, 0)
-            if clicks > 1:
+            if i < clicks - 1:
                 time.sleep(0.08)
 
     def mouse_down(self, button: str = "left"):
